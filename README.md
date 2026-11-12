@@ -39,9 +39,9 @@ The pipeline runs in bounded steps on a 10-minute cron (`/api/cron/tick`). Each 
 
 ## Setup (about 30 minutes)
 
-1. **Supabase.** Create a project, then run `supabase/migrations/0001_init.sql` `0002_aeo_mentions.sql`, `0003_page_note.sql` and `0004_bookings.sql` in the SQL editor.
-2. **Environment.** `cp .env.example .env.local` and fill it in. You need Supabase, Anthropic, `APP_URL`, `ADMIN_PASSWORD` and `CRON_SECRET`. The lead-source and Hunter keys are optional.
-3. **Run locally.** `npm install && npm run dev`, then open http://localhost:3000. The username is `admin` and the password is `ADMIN_PASSWORD`.
+1. **Supabase.** Create a project, then run `supabase/migrations/0001_init.sql` `0002_aeo_mentions.sql`, `0003_page_note.sql`, `0004_bookings.sql` and `0005_admin_users.sql` in the SQL editor.
+2. **Environment.** `cp .env.example .env.local` and fill it in. You need Supabase, Anthropic, `APP_URL` and `CRON_SECRET`. The lead-source and Hunter keys are optional.
+3. **Run locally.** `npm install && npm run dev`, then open http://localhost:3000. The default login is `admin` / `zappsites@2026` (created by migration `0005_admin_users.sql`); change it or add more logins in the Supabase SQL editor with `select admin_set_password('your-username', 'your-password');`.
 4. **Deploy.** Push to Vercel and set the same env vars there. `vercel.json` already sets up both crons, and Vercel sends the `CRON_SECRET` bearer automatically. The tick needs a plan that allows `maxDuration = 300` (Pro). On Hobby, run `npm run worker` on Railway/Fly/a VPS instead, or call `/api/cron/tick` from any external cron with the bearer header.
 5. In the app:
    1. **Mailboxes:** add 1–3 warmed mailboxes on a **secondary domain**.

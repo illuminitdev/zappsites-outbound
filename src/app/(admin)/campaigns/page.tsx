@@ -1,10 +1,11 @@
+import { ChevronDown, Megaphone, Plus } from "lucide-react";
 import { saveCampaign } from "@/app/actions";
-import { Flash } from "@/components/ui";
-import { db, must } from "@/lib/db";
+import { Empty, Flash } from "@/components/ui";
 import { DEFAULT_AEO_PROMPTS } from "@/lib/audit/mentions";
+import { db, must } from "@/lib/db";
+import type { Campaign } from "@/lib/types";
 
 const isLegacy = (p?: string[]) => !p?.length || (p.length === DEFAULT_AEO_PROMPTS.length && p.every((x, i) => x === DEFAULT_AEO_PROMPTS[i]));
-import type { Campaign } from "@/lib/types";
 
 const DEFAULT_STEPS = JSON.stringify(
   [
@@ -18,72 +19,109 @@ const DEFAULT_STEPS = JSON.stringify(
 
 function CampaignForm({ c }: { c?: Campaign }) {
   return (
-    <form action={saveCampaign} className="card">
+    <form action={saveCampaign} className="form-sections">
       {c && <input type="hidden" name="id" value={c.id} />}
-      <div className="row">
-        <div>
-          <label>Name</label>
-          <input name="name" required defaultValue={c?.name} placeholder="Trade insurance brokers: AI visibility" />
+
+      <fieldset>
+        <legend>Basics</legend>
+        <div className="row">
+          <div>
+            <label>Campaign name</label>
+            <input name="name" required defaultValue={c?.name} placeholder="Trade insurance brokers: AI visibility" />
+          </div>
+          <div>
+            <label>External booking link (optional)</label>
+            <input name="booking_url" type="url" defaultValue={c?.booking_url} placeholder="Empty = your built-in /book page" />
+          </div>
         </div>
-        <div>
-          <label>External booking link (optional; leave empty to use your built-in /book page)</label>
-          <input name="booking_url" type="url" defaultValue={c?.booking_url} placeholder="Empty = audit.zappsites.com/book" />
+      </fieldset>
+
+      <fieldset>
+        <legend>What you&apos;re selling</legend>
+        <label>Offer: what you sell, in one or two sentences</label>
+        <textarea
+          name="offer"
+          required
+          defaultValue={c?.offer}
+          placeholder="Fixed-price AEO audit and fix plan: make your firm show up when trades ask ChatGPT or Google for insurance. £X, delivered in 5 days."
+        />
+        <label>Who it is for</label>
+        <input name="icp" required defaultValue={c?.icp} placeholder="Independent UK commercial insurance brokers specialising in trades, 2-50 staff" />
+        <label>Proof Claude may use (only true statements; leave empty if none yet)</label>
+        <textarea name="proof" defaultValue={c?.proof} placeholder="Built and run SEO Stack, an SEO data platform used by agencies." />
+        <div className="row">
+          <div>
+            <label>Tone</label>
+            <input name="tone" defaultValue={c?.tone ?? "plain, direct, British English, no hype"} />
+          </div>
+          <div>
+            <label>Signature (optional)</label>
+            <textarea name="signature" style={{ minHeight: 60 }} defaultValue={c?.signature} placeholder={"Leave empty for: Ram\nZappSites · 020 3488 6301"} />
+          </div>
         </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>AI visibility test</legend>
+        <p className="muted small">Asks ChatGPT, Claude, Perplexity and Gemini buyer questions and checks whether the lead is recommended.</p>
+        <div className="row">
+          <div>
+            <label>Category buyers ask AI for (empty = skip this test)</label>
+            <input name="aeo_category" defaultValue={c?.aeo_category} placeholder="commercial insurance brokers for tradespeople" />
+          </div>
+          <div>
+            <label>Custom questions, one per line ({"{service}"}, {"{category}"}, {"{city}"} work)</label>
+            <textarea
+              name="aeo_prompts"
+              style={{ minHeight: 90 }}
+              defaultValue={isLegacy(c?.aeo_prompts) ? "" : c!.aeo_prompts.join("\n")}
+              placeholder={"Empty = automatic: we read each lead's website and ask about the services they list.\nOr use {service}, e.g.\nWho's the best company for {service} in {city}?"}
+            />
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Sequence</legend>
+        <label>Steps (JSON): day = days after the first email</label>
+        <textarea name="steps" className="mono" style={{ minHeight: 170 }} defaultValue={c ? JSON.stringify(c.steps, null, 2) : DEFAULT_STEPS} />
+        <div className="row3">
+          <div>
+            <label>Send from (hour, UK time)</label>
+            <input name="send_window_start" type="number" min={0} max={23} defaultValue={c?.send_window_start ?? 8} />
+          </div>
+          <div>
+            <label>Send until (hour, UK time)</label>
+            <input name="send_window_end" type="number" min={1} max={24} defaultValue={c?.send_window_end ?? 17} />
+          </div>
+          <div>
+            <label>Days</label>
+            <div className="static-field">Mon–Fri only</div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Options</legend>
+        <label className="toggle">
+          <input type="checkbox" name="active" defaultChecked={c?.active} />
+          <span>
+            <b>Active</b>
+            <small>Emails are only written for active campaigns.</small>
+          </span>
+        </label>
+        <label className="toggle">
+          <input type="checkbox" name="auto_approve" defaultChecked={c?.auto_approve} />
+          <span>
+            <b>Auto-approve written sequences</b>
+            <small>Leave off until you trust the output. Off means you review every email first.</small>
+          </span>
+        </label>
+      </fieldset>
+
+      <div className="form-foot">
+        <button className="btn-primary">{c ? "Save campaign" : "Create campaign"}</button>
       </div>
-      <label>Offer: what you sell, in one or two sentences</label>
-      <textarea name="offer" required defaultValue={c?.offer} placeholder="Fixed-price AEO audit and fix plan: make your firm show up when trades ask ChatGPT or Google for insurance. £X, delivered in 5 days." />
-      <label>Who it is for</label>
-      <input name="icp" required defaultValue={c?.icp} placeholder="Independent UK commercial insurance brokers specialising in trades, 2-50 staff" />
-      <label>Proof Claude may use (only true statements; leave empty if none yet)</label>
-      <textarea name="proof" defaultValue={c?.proof} placeholder="Built and run SEO Stack, an SEO data platform used by agencies." />
-      <div className="row">
-        <div>
-          <label>Tone</label>
-          <input name="tone" defaultValue={c?.tone ?? "plain, direct, British English, no hype"} />
-        </div>
-        <div>
-          <label>Signature (optional)</label>
-          <textarea name="signature" style={{ minHeight: 60 }} defaultValue={c?.signature} placeholder={"Leave empty for: Ram\nZappSites · 020 3488 6301"} />
-        </div>
-      </div>
-      <div className="row">
-        <div>
-          <label>AEO/GEO category: what buyers ask AI for (empty = skip the AI mentions audit)</label>
-          <input name="aeo_category" defaultValue={c?.aeo_category} placeholder="commercial insurance brokers for tradespeople" />
-        </div>
-        <div>
-          <label>AI questions (leave empty to write them from each lead&apos;s own services). One per line; {"{service}"}, {"{category}"}, {"{city}"} work.</label>
-          <textarea
-            name="aeo_prompts"
-            style={{ minHeight: 90 }}
-            defaultValue={isLegacy(c?.aeo_prompts) ? "" : c!.aeo_prompts.join("\n")}
-            placeholder={"Empty = automatic: we read each lead's website and ask about the services they list.\nOr use {service}, e.g.\nWho's the best company for {service} in {city}?"}
-          />
-        </div>
-      </div>
-      <label>Sequence steps (JSON): day = days after the first email</label>
-      <textarea name="steps" style={{ minHeight: 160, fontFamily: "ui-monospace, monospace", fontSize: 13 }} defaultValue={c ? JSON.stringify(c.steps, null, 2) : DEFAULT_STEPS} />
-      <div className="row3">
-        <div>
-          <label>Send from (hour, UK time)</label>
-          <input name="send_window_start" type="number" min={0} max={23} defaultValue={c?.send_window_start ?? 8} />
-        </div>
-        <div>
-          <label>Send until (hour, UK time)</label>
-          <input name="send_window_end" type="number" min={1} max={24} defaultValue={c?.send_window_end ?? 17} />
-        </div>
-        <div>
-          <label>&nbsp;</label>
-          <span>Mon–Fri only</span>
-        </div>
-      </div>
-      <label>
-        <input type="checkbox" name="auto_approve" defaultChecked={c?.auto_approve} /> Auto-approve written sequences (leave off until you trust the output)
-      </label>
-      <label>
-        <input type="checkbox" name="active" defaultChecked={c?.active} /> Active (emails are only written for active campaigns)
-      </label>
-      <button>{c ? "Save" : "Create campaign"}</button>
     </form>
   );
 }
@@ -93,18 +131,53 @@ export default async function Campaigns({ searchParams }: { searchParams: Promis
   const campaigns = must(await db().from("campaigns").select("*").order("created_at", { ascending: false })) as Campaign[];
   return (
     <>
-      <h1>Campaigns</h1>
+      <div className="page-head">
+        <div>
+          <h1>Campaigns</h1>
+          <p className="muted">What you sell, who to, and how the email sequence runs. Claude writes every email from this.</p>
+        </div>
+        <a href="#new" className="btn-link">
+          <Plus size={16} aria-hidden="true" />
+          New campaign
+        </a>
+      </div>
       <Flash msg={msg} />
-      {campaigns.map((c) => (
-        <details key={c.id} className="card">
-          <summary>
-            <b>{c.name}</b> {c.active ? <span className="pill good">active</span> : <span className="pill">paused</span>}
-          </summary>
-          <CampaignForm c={c} />
-        </details>
-      ))}
-      <h2>New campaign</h2>
-      <CampaignForm />
+
+      {campaigns.length === 0 ? (
+        <div className="card">
+          <Empty icon={Megaphone} title="No campaigns yet">Create your first one below, then tick Active.</Empty>
+        </div>
+      ) : (
+        <div className="stack">
+          {campaigns.map((c) => (
+            <details key={c.id} className="card campaign">
+              <summary>
+                <div className="campaign-main">
+                  <b>{c.name}</b>
+                  <span className="muted small clamp">{c.offer}</span>
+                </div>
+                <div className="campaign-meta">
+                  <span className="chip">{c.steps.length} emails</span>
+                  {c.aeo_category && <span className="chip">AI test on</span>}
+                  {c.auto_approve && <span className="chip">auto-approve</span>}
+                  {c.active ? <span className="pill good">active</span> : <span className="pill">paused</span>}
+                  <ChevronDown size={18} className="chev" aria-hidden="true" />
+                </div>
+              </summary>
+              <div className="campaign-body">
+                <CampaignForm c={c} />
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+
+      <h2 id="new" className="section-title">
+        New campaign
+      </h2>
+      <div className="card">
+        <CampaignForm />
+      </div>
     </>
   );
 }

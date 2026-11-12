@@ -10,9 +10,6 @@ export const env = {
   get appUrl() {
     return (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
   },
-  get adminPassword() {
-    return required("ADMIN_PASSWORD");
-  },
   get cronSecret() {
     return required("CRON_SECRET");
   },
