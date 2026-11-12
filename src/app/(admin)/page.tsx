@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { ArrowRight, CalendarCheck, Check, MessageSquareReply, Play, Send, TriangleAlert, type LucideIcon } from "lucide-react";
+import { ArrowRight, CalendarCheck, MessageSquareReply, Play, Send, TriangleAlert, type LucideIcon } from "lucide-react";
 import { runTick } from "@/app/actions";
+import { SubmitButton } from "@/components/SubmitButton";
 import { Flash, fmt } from "@/components/ui";
 import { brand } from "@/lib/brand";
 import { db } from "@/lib/db";
@@ -39,13 +40,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   };
   const head = { count: "exact" as const, head: true };
 
-  const [s, statusCounts, waiting, boxes, live, totalLeads, callsRes] = await Promise.all([
+  const [s, statusCounts, waiting, callsRes] = await Promise.all([
     weeklyStats(),
     Promise.all([...FUNNEL, ...OUTCOMES].map(async (st) => [st.id, await count(db().from("leads").select("id", head).eq("status", st.id))] as const)),
     count(db().from("messages").select("id", head).eq("direction", "in").eq("handled", false)),
-    count(db().from("mailboxes").select("id", head).eq("active", true)),
-    count(db().from("campaigns").select("id", head).eq("active", true)),
-    count(db().from("leads").select("id", head)),
     // Don't crash if the bookings migration (0004) hasn't been run yet; flag it instead.
     db().from("bookings").select("*").eq("status", "confirmed").gte("start_at", new Date(Date.now() - 3600_000).toISOString()).order("start_at").limit(8),
   ]);
@@ -54,14 +52,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const calls = (callsRes.data ?? []) as Call[];
   const maxFunnel = Math.max(1, ...FUNNEL.map((f) => byStatus.get(f.id) ?? 0));
   const bounceHigh = s.sent > 0 && s.bounces / s.sent > 0.03;
-
-  const setup = [
-    { done: !bookingsMissing, label: "Database set up", hint: "Run migrations 0002–0004 in the Supabase SQL editor", href: "/settings" },
-    { done: boxes > 0, label: "Sending mailbox added", hint: "A warmed mailbox on a secondary domain", href: "/mailboxes" },
-    { done: live > 0, label: "Campaign active", hint: "Offer, audience and sequence", href: "/campaigns" },
-    { done: totalLeads > 0, label: "Leads imported", hint: "Maps search, Companies House or CSV", href: "/leads" },
-  ];
-  const setupLeft = setup.filter((x) => !x.done).length;
 
   const kpis: { label: string; value: string | number; sub: string; icon: LucideIcon; warn?: boolean }[] = [
     { label: "Emails sent", value: s.sent, sub: "last 7 days", icon: Send },
@@ -80,38 +70,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <p className="muted">Here&apos;s how outbound is doing. The pipeline runs automatically every 10 minutes.</p>
         </div>
         <form action={runTick}>
-          <button className="btn-primary">
+          <SubmitButton pending="Running pipeline... (can take a few minutes)">
             <Play size={15} aria-hidden="true" />
             Run pipeline now
-          </button>
+          </SubmitButton>
         </form>
       </div>
       <Flash msg={msg} />
-
-      {setupLeft > 0 && (
-        <div className="card setup">
-          <div className="setup-head">
-            <b>Finish setting up</b>
-            <span className="muted">
-              {setup.length - setupLeft} of {setup.length} done
-            </span>
-          </div>
-          <div className="setup-bar">
-            <span style={{ width: `${((setup.length - setupLeft) / setup.length) * 100}%` }} />
-          </div>
-          <div className="setup-list">
-            {setup.map((x) => (
-              <Link key={x.label} href={x.href} className={`setup-item ${x.done ? "done" : ""}`}>
-                <span className="setup-check">{x.done && <Check size={12} strokeWidth={3} aria-label="Done" />}</span>
-                <span>
-                  <b>{x.label}</b>
-                  <small>{x.hint}</small>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="kpis">
         {kpis.map((k) => (

@@ -1,8 +1,9 @@
 import type { LucideIcon } from "lucide-react";
+import { Toast } from "./Toast";
 import type { LeadStatus } from "@/lib/types";
 
 export function Flash({ msg }: { msg?: string }) {
-  return msg ? <div className="msg">{msg}</div> : null;
+  return msg ? <Toast key={msg} msg={msg} /> : null;
 }
 
 const TONE: Partial<Record<LeadStatus | string, string>> = {

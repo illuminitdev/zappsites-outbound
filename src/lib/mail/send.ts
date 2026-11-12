@@ -46,3 +46,29 @@ export async function sendMail(mailbox: Mailbox, mail: OutboundMail): Promise<st
   });
   return messageId;
 }
+
+/** Log in to the SMTP server without sending anything. Throws a readable error if it fails. */
+export async function verifySmtp(m: Pick<Mailbox, "smtp_host" | "smtp_port" | "smtp_user" | "smtp_pass">): Promise<void> {
+  const transport = nodemailer.createTransport({
+    host: m.smtp_host,
+    port: m.smtp_port,
+    secure: m.smtp_port === 465,
+    auth: { user: m.smtp_user, pass: m.smtp_pass },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+  });
+  try {
+    await transport.verify();
+  } catch (e) {
+    const err = e as { code?: string; responseCode?: number; message: string };
+    if (err.code === "EAUTH" || err.responseCode === 535 || err.responseCode === 534)
+      throw new Error("Login failed. Check the username and app password (a normal password won't work if 2-step verification is on).");
+    if (err.code === "EDNS" || err.code === "ENOTFOUND") throw new Error(`Can't find server ${m.smtp_host}. Check the SMTP host.`);
+    if (err.code === "ETIMEDOUT" || err.code === "ECONNECTION" || err.code === "ESOCKET")
+      throw new Error(`Couldn't connect to ${m.smtp_host}:${m.smtp_port}. Check the host and port.`);
+    throw new Error(`SMTP check failed: ${err.message}`);
+  } finally {
+    transport.close();
+  }
+}

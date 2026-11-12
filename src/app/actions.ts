@@ -7,6 +7,7 @@ import { db, must } from "@/lib/db";
 import { createBooking } from "@/lib/booking";
 import { createInboundCheck, runInboundAudit } from "@/lib/inbound";
 import { parseLeadsCsv } from "@/lib/leads/csv";
+import { verifySmtp } from "@/lib/mail/send";
 import {
   approveLeads,
   importFromCompaniesHouse,
@@ -30,55 +31,94 @@ export async function runTick() {
 
 // ---- campaigns ----
 
+/**
+ * The form only shows the fields a campaign needs. Anything it doesn't send (sequence steps,
+ * send window, tone, signature, etc.) keeps its current value, or the database default for a new campaign.
+ */
 export async function saveCampaign(f: FormData) {
-  let steps: Step[];
-  try {
-    steps = JSON.parse(str(f, "steps") || "[]");
-    if (!Array.isArray(steps) || !steps.length || steps.some((s) => typeof s.day !== "number" || !s.instructions)) throw new Error();
-  } catch {
-    back("/campaigns", 'Steps must be JSON like [{"day":0,"instructions":"..."}]');
-    return;
-  }
-  const row = {
+  const row: Record<string, unknown> = {
     name: str(f, "name"),
     offer: str(f, "offer"),
     icp: str(f, "icp"),
     proof: str(f, "proof"),
-    tone: str(f, "tone") || "plain, direct, British English, no hype",
-    booking_url: str(f, "booking_url"),
-    signature: str(f, "signature"),
     aeo_category: str(f, "aeo_category"),
-    aeo_prompts: str(f, "aeo_prompts").split(/\r?\n/).map((l) => l.trim()).filter(Boolean),
-    steps,
-    send_window_start: Number(str(f, "send_window_start") || 8),
-    send_window_end: Number(str(f, "send_window_end") || 17),
-    auto_approve: f.get("auto_approve") === "on",
-    active: f.get("active") === "on",
   };
+  if (f.has("steps")) {
+    let steps: Step[];
+    try {
+      steps = JSON.parse(str(f, "steps") || "[]");
+      if (!Array.isArray(steps) || !steps.length || steps.some((s) => typeof s.day !== "number" || !s.instructions)) throw new Error();
+    } catch {
+      back("/campaigns", 'Steps must be JSON like [{"day":0,"instructions":"..."}]');
+      return;
+    }
+    row.steps = steps;
+  }
+  for (const k of ["tone", "booking_url", "signature"]) if (f.has(k)) row[k] = str(f, k);
+  if (f.has("aeo_prompts")) row.aeo_prompts = str(f, "aeo_prompts").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (const k of ["send_window_start", "send_window_end"]) if (f.has(k)) row[k] = Number(str(f, k));
+
   const id = str(f, "id");
   if (id) must(await db().from("campaigns").update(row).eq("id", id));
-  else must(await db().from("campaigns").insert(row));
+  else must(await db().from("campaigns").insert({ ...row, active: true })); // new campaigns start running
   revalidatePath("/campaigns");
   back("/campaigns", "Campaign saved");
 }
 
+export async function setCampaignActive(f: FormData) {
+  const active = str(f, "active") === "true";
+  must(await db().from("campaigns").update({ active }).eq("id", str(f, "id")));
+  revalidatePath("/campaigns");
+  back("/campaigns", active ? "Campaign resumed" : "Campaign paused");
+}
+
 // ---- mailboxes ----
 
+const PROVIDERS: Record<string, { smtp_host: string; smtp_port: number; imap_host: string; imap_port: number }> = {
+  google: { smtp_host: "smtp.gmail.com", smtp_port: 465, imap_host: "imap.gmail.com", imap_port: 993 },
+  microsoft: { smtp_host: "smtp.office365.com", smtp_port: 587, imap_host: "outlook.office365.com", imap_port: 993 },
+};
+
 export async function saveMailbox(f: FormData) {
-  const row = {
-    email: str(f, "email").toLowerCase(),
-    from_name: str(f, "from_name"),
-    smtp_host: str(f, "smtp_host"),
-    smtp_port: Number(str(f, "smtp_port") || 465),
-    smtp_user: str(f, "smtp_user") || str(f, "email"),
-    smtp_pass: str(f, "smtp_pass"),
-    imap_host: str(f, "imap_host"),
-    imap_port: Number(str(f, "imap_port") || 993),
-    daily_limit: Number(str(f, "daily_limit") || 30),
-  };
-  must(await db().from("mailboxes").upsert(row, { onConflict: "email" }));
-  revalidatePath("/mailboxes");
-  back("/mailboxes", "Mailbox saved");
+  let msg: string;
+  try {
+    const email = str(f, "email").toLowerCase();
+    const id = str(f, "id");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("Enter a valid email address");
+    const preset = PROVIDERS[str(f, "provider")];
+    const servers = preset ?? {
+      smtp_host: str(f, "smtp_host"),
+      smtp_port: Number(str(f, "smtp_port") || 465),
+      imap_host: str(f, "imap_host"),
+      imap_port: Number(str(f, "imap_port") || 993),
+    };
+    if (!servers.smtp_host || !servers.imap_host) throw new Error("Enter the SMTP and IMAP hosts");
+
+    // Editing: a blank password keeps the saved one.
+    let smtp_pass = str(f, "smtp_pass").replace(/\s+/g, "");
+    if (!smtp_pass && id) {
+      const old = must(await db().from("mailboxes").select("smtp_pass").eq("id", id).maybeSingle()) as { smtp_pass: string } | null;
+      smtp_pass = old?.smtp_pass ?? "";
+    }
+    if (!smtp_pass) throw new Error("Enter the app password");
+
+    const row = {
+      email,
+      from_name: str(f, "from_name") || email.split("@")[0],
+      ...servers,
+      smtp_user: str(f, "smtp_user") || email,
+      smtp_pass,
+      daily_limit: Math.min(200, Math.max(1, Number(str(f, "daily_limit") || 30))),
+    };
+    await verifySmtp(row);
+    if (id) must(await db().from("mailboxes").update(row).eq("id", id));
+    else must(await db().from("mailboxes").upsert(row, { onConflict: "email" }));
+    revalidatePath("/mailboxes");
+    msg = id ? "Mailbox updated" : "Mailbox connected";
+  } catch (e) {
+    msg = `Couldn't save mailbox: ${(e as Error).message}`;
+  }
+  back("/mailboxes", msg);
 }
 
 export async function toggleMailbox(f: FormData) {

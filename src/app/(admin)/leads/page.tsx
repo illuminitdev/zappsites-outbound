@@ -1,8 +1,12 @@
 import Link from "next/link";
-import { Building2, Check, FileSpreadsheet, MapPin, Plus, Search, Users } from "lucide-react";
+import { Building2, Check, MapPin, Search, Users } from "lucide-react";
 import { approveSelected, importCompaniesHouse, importCsv, importPlaces } from "@/app/actions";
+import { ModalButton } from "@/components/Modal";
+import { StatusFilter } from "@/components/StatusFilter";
+import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, Flash, Pill, Score } from "@/components/ui";
 import { db, must } from "@/lib/db";
+import { friendlyError } from "@/lib/errors";
 import type { Lead } from "@/lib/types";
 
 const FILTERS = ["all", "new", "enriched", "audited", "ready", "sequencing", "replied", "interested", "meeting", "error"];
@@ -41,6 +45,8 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
   const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   const isReady = status === "ready";
 
+  const countOptions = FILTERS.map((f) => ({ value: f, count: countOf.get(f) ?? 0 }));
+
   return (
     <>
       <div className="page-head">
@@ -48,34 +54,82 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
           <h1>Leads</h1>
           <p className="muted">Businesses you&apos;re prospecting. They move through the pipeline automatically; you approve the emails.</p>
         </div>
-        <a href="#add" className="btn-link">
-          <Plus size={16} aria-hidden="true" />
-          Add leads
-        </a>
+        <div className="head-actions">
+          <ModalButton label="Upload CSV" title="Upload leads from CSV" icon="upload" variant="secondary" size="md">
+            <form action={importCsv} className="modal-form">
+              <p className="muted small">Columns: company, website, email, first name, last name, city, entity type. Each row needs a company plus a website or email.</p>
+              <label>File</label>
+              <input type="file" name="file" accept=".csv,text/csv" required />
+              <label>Campaign</label>
+              <CampaignSelect />
+              <SubmitButton pending="Uploading...">Upload</SubmitButton>
+            </form>
+          </ModalButton>
+          <ModalButton label="Add leads" title="Add leads">
+            <div className="add-grid">
+              <form action={importPlaces} className="add-card">
+                <div className="add-icon">
+                  <MapPin size={20} aria-hidden="true" />
+                </div>
+                <h3>Google Maps search</h3>
+                <p className="muted small">Local businesses with a website, e.g. &quot;electricians in Leeds&quot;.</p>
+                <label>Search</label>
+                <input name="query" required placeholder="commercial insurance brokers in Manchester" />
+                <div className="row">
+                  <div>
+                    <label>Max results (≤60)</label>
+                    <input name="max" type="number" defaultValue={60} max={60} />
+                  </div>
+                  <div>
+                    <label>Campaign</label>
+                    <CampaignSelect />
+                  </div>
+                </div>
+                <SubmitButton pending="Importing from Google Maps...">Import</SubmitButton>
+              </form>
+
+              <form action={importCompaniesHouse} className="add-card">
+                <div className="add-icon">
+                  <Building2 size={20} aria-hidden="true" />
+                </div>
+                <h3>New companies</h3>
+                <p className="muted small">Recently registered UK companies from Companies House, by industry code.</p>
+                <label>SIC codes</label>
+                <input name="sic" required placeholder="66220, 43210" />
+                <div className="row">
+                  <div>
+                    <label>Incorporated since</label>
+                    <input name="from" type="date" required defaultValue={monthAgo} />
+                  </div>
+                  <div>
+                    <label>Location (optional)</label>
+                    <input name="location" placeholder="Leeds" />
+                  </div>
+                </div>
+                <label>Campaign</label>
+                <CampaignSelect />
+                <SubmitButton pending="Importing from Companies House...">Import</SubmitButton>
+              </form>
+            </div>
+          </ModalButton>
+        </div>
       </div>
       <Flash msg={msg} />
 
       <div className="toolbar">
-        <div className="segmented">
-          {FILTERS.map((f) => (
-            <Link key={f} href={`/leads?status=${f}`} className={f === status ? "on" : undefined}>
-              {f}
-              <span>{countOf.get(f) ?? 0}</span>
-            </Link>
-          ))}
-        </div>
         <form className="search" action="/leads">
           <input type="hidden" name="status" value={status} />
           <Search size={16} className="search-icon" aria-hidden="true" />
           <input name="q" defaultValue={q} placeholder="Search company or domain…" />
         </form>
+        <StatusFilter status={status} q={q} options={countOptions} />
       </div>
 
       <form action={approveSelected}>
         <div className="card table-card">
           {leads.length === 0 ? (
             <Empty icon={Users} title={q ? "No leads match your search" : status === "all" ? "No leads yet" : `No leads in “${status}”`}>
-              {status === "all" && !q ? "Import some from Google Maps, Companies House or a CSV below." : null}
+              {status === "all" && !q ? "Use Add leads or Upload CSV above to import some." : null}
             </Empty>
           ) : (
             <table className="data">
@@ -114,7 +168,11 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                     <td>{l.pecr_ok ? <span className="pill good">ok</span> : <span className="pill warn">{l.entity_type.replace(/_/g, " ")}</span>}</td>
                     <td>
                       <Pill v={l.status} />
-                      {l.last_error && <div className="row-error">{l.last_error}</div>}
+                      {l.last_error && (
+                        <div className="row-error" title={l.last_error}>
+                          {friendlyError(l.last_error)}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -133,67 +191,6 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
         )}
       </form>
 
-      <h2 id="add" className="section-title">
-        Add leads
-      </h2>
-      <div className="add-grid">
-        <form action={importPlaces} className="card add-card">
-          <div className="add-icon">
-            <MapPin size={20} aria-hidden="true" />
-          </div>
-          <h3>Google Maps search</h3>
-          <p className="muted small">Local businesses with a website, e.g. &quot;electricians in Leeds&quot;.</p>
-          <label>Search</label>
-          <input name="query" required placeholder="commercial insurance brokers in Manchester" />
-          <div className="row">
-            <div>
-              <label>Max results (≤60)</label>
-              <input name="max" type="number" defaultValue={60} max={60} />
-            </div>
-            <div>
-              <label>Campaign</label>
-              <CampaignSelect />
-            </div>
-          </div>
-          <button className="btn-primary">Import</button>
-        </form>
-
-        <form action={importCompaniesHouse} className="card add-card">
-          <div className="add-icon">
-            <Building2 size={20} aria-hidden="true" />
-          </div>
-          <h3>New companies</h3>
-          <p className="muted small">Recently registered UK companies from Companies House, by industry code.</p>
-          <label>SIC codes</label>
-          <input name="sic" required placeholder="66220, 43210" />
-          <div className="row">
-            <div>
-              <label>Incorporated since</label>
-              <input name="from" type="date" required defaultValue={monthAgo} />
-            </div>
-            <div>
-              <label>Location (optional)</label>
-              <input name="location" placeholder="Leeds" />
-            </div>
-          </div>
-          <label>Campaign</label>
-          <CampaignSelect />
-          <button className="btn-primary">Import</button>
-        </form>
-
-        <form action={importCsv} className="card add-card">
-          <div className="add-icon">
-            <FileSpreadsheet size={20} aria-hidden="true" />
-          </div>
-          <h3>CSV upload</h3>
-          <p className="muted small">Columns: company, website, email, first name, last name, city, entity type. Needs company plus website or email.</p>
-          <label>File</label>
-          <input type="file" name="file" accept=".csv,text/csv" required />
-          <label>Campaign</label>
-          <CampaignSelect />
-          <button className="btn-primary">Upload</button>
-        </form>
-      </div>
     </>
   );
 }

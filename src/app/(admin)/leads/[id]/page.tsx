@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { approveOne, confirmPecr, meetingBooked, resetLead, saveDraft } from "@/app/actions";
 import { Flash, Pill, Score, fmt } from "@/components/ui";
 import { db, must } from "@/lib/db";
+import { friendlyError } from "@/lib/errors";
 import type { Lead, Message } from "@/lib/types";
 
 const PROMPT_SOURCE = { website: "from their website", campaign: "campaign", fallback: "generic (couldn't read site)", default: "generic" } as const;
@@ -109,7 +110,15 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               <b>Latest reply:</b> {lead.notes}
             </p>
           )}
-          {lead.last_error && <p className="row-error">Error: {lead.last_error}</p>}
+          {lead.last_error && (
+            <>
+              <p className="row-error">{friendlyError(lead.last_error)}</p>
+              <details className="muted small">
+                <summary>Technical details</summary>
+                <code className="mono">{lead.last_error}</code>
+              </details>
+            </>
+          )}
         </div>
       )}
 
