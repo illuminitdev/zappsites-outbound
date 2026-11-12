@@ -32,12 +32,17 @@ export async function sessionToken(userId: string): Promise<string> {
   return `${payload}.${await hmac(key, payload)}`;
 }
 
-export async function isValidSession(cookie: string | undefined): Promise<boolean> {
+/** The logged-in admin's id if the cookie is valid and not expired, otherwise null. */
+export async function sessionUserId(cookie: string | undefined): Promise<string | null> {
   const key = signingKey();
-  if (!cookie || !key) return false;
+  if (!cookie || !key) return null;
   const parts = cookie.split(".");
-  if (parts.length !== 3) return false;
+  if (parts.length !== 3) return null;
   const [userId, exp, sig] = parts;
-  if (!userId || !/^\d+$/.test(exp) || Number(exp) < Date.now() / 1000) return false;
-  return safeEqual(sig, await hmac(key, `${userId}.${exp}`));
+  if (!userId || !/^\d+$/.test(exp) || Number(exp) < Date.now() / 1000) return null;
+  return safeEqual(sig, await hmac(key, `${userId}.${exp}`)) ? userId : null;
+}
+
+export async function isValidSession(cookie: string | undefined): Promise<boolean> {
+  return (await sessionUserId(cookie)) !== null;
 }

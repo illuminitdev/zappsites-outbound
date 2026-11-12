@@ -3,7 +3,7 @@ import { SESSION_COOKIE, isValidSession } from "@/lib/session";
 
 // Everything needs an admin session except prospect-facing pages, the login page and cron endpoints
 // (cron endpoints check their own bearer secret).
-const PUBLIC_PREFIXES = ["/login", "/p/", "/u/", "/book", "/check", "/api/cron/", "/api/public/", "/_next/", "/favicon"];
+const PUBLIC_PREFIXES = ["/login", "/p/", "/u/", "/book", "/check", "/api/cron/", "/api/public/", "/_next/", "/favicon", "/zappsites-outbound-logo.png"];
 
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;

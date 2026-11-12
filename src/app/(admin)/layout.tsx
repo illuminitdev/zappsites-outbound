@@ -1,9 +1,10 @@
 import { LogOut } from "lucide-react";
+import { cookies } from "next/headers";
 import { NavLinks } from "@/components/NavLinks";
 import { Topbar, type Notification } from "@/components/Topbar";
 import { logout } from "@/app/login/actions";
-import { brand } from "@/lib/brand";
 import { db } from "@/lib/db";
+import { SESSION_COOKIE, sessionUserId } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -37,18 +38,36 @@ async function loadNotifications(): Promise<Notification[]> {
   return out;
 }
 
+/** Username of whoever is logged in (the proxy has already checked the session). */
+async function loadCurrentUser(): Promise<string | null> {
+  const id = await sessionUserId((await cookies()).get(SESSION_COOKIE)?.value);
+  if (!id) return null;
+  const { data } = await db().from("admin_users").select("username").eq("id", id).maybeSingle();
+  return data?.username ?? null;
+}
+
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const notifications = await loadNotifications();
+  const [notifications, username] = await Promise.all([loadNotifications(), loadCurrentUser()]);
   return (
     <div className="shell">
       <nav className="nav">
-        <a href="/" className="nav-brand" aria-label={`${brand.name} outbound engine – dashboard`}>
+        <a href="/" className="nav-brand" aria-label="ZappSites Outbound – dashboard">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={brand.logoUrl} alt={brand.name} />
-          <span>Outbound engine</span>
+          <img src="/zappsites-outbound-logo.png" alt="ZappSites Outbound" />
         </a>
         <NavLinks />
         <form action={logout} className="nav-logout">
+          {username && (
+            <div className="nav-user">
+              <span className="nav-user-avatar" aria-hidden="true">
+                {username.charAt(0).toUpperCase()}
+              </span>
+              <span className="nav-user-text">
+                <b>{username}</b>
+                <small>Administrator</small>
+              </span>
+            </div>
+          )}
           <button className="secondary">
             <LogOut size={16} aria-hidden="true" />
             Log out

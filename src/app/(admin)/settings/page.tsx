@@ -1,182 +1,63 @@
-import { videoUrl } from "@/lib/booking";
-import { availabilityFromEnv } from "@/lib/booking/slots";
-import { brand } from "@/lib/brand";
+import { cookies } from "next/headers";
+import { PasswordInput } from "@/app/login/PasswordInput";
 import { db } from "@/lib/db";
-import { env } from "@/lib/env";
+import { SESSION_COOKIE, sessionUserId } from "@/lib/session";
+import { updatePassword, updateUsername } from "./actions";
 
-// Read-only view of how the app is configured. Values come from environment variables
-// (.env locally, Project Settings → Environment Variables on Vercel). Secrets are never shown.
-
-const has = (k: string) => !!process.env[k]?.trim();
-
-const INTEGRATIONS = [
-  { key: "SUPABASE_SERVICE_ROLE_KEY", name: "Supabase", use: "Database", required: true },
-  { key: "ANTHROPIC_API_KEY", name: "Claude (Anthropic)", use: "Writes emails, triages replies, reads lead websites", required: true },
-  { key: "GOOGLE_PLACES_API_KEY", name: "Google Places", use: "Import leads from a Google Maps search" },
-  { key: "COMPANIES_HOUSE_API_KEY", name: "Companies House", use: "Import new companies, PECR checks" },
-  { key: "HUNTER_API_KEY", name: "Hunter", use: "Find and verify email addresses" },
-  { key: "PAGESPEED_API_KEY", name: "Google PageSpeed", use: "Mobile speed scores (works at low volume without a key)" },
-  { key: "OPENAI_API_KEY", name: "ChatGPT (OpenAI)", use: "AI-mentions audit" },
-  { key: "PERPLEXITY_API_KEY", name: "Perplexity", use: "AI-mentions audit" },
-  { key: "GEMINI_API_KEY", name: "Gemini (Google)", use: "AI-mentions audit" },
-];
-
-/** Probe the tables/columns each migration adds; PostgREST errors if they're missing. */
-async function migrationStatus() {
-  const ok = async (q: PromiseLike<{ error: unknown }>) => !(await q).error;
-  const [m1, m2, m3, m4, m5] = await Promise.all([
-    ok(db().from("leads").select("id").limit(1)),
-    ok(db().from("leads").select("aeo_mention_rate").limit(1)),
-    ok(db().from("leads").select("audit_note").limit(1)),
-    ok(db().from("bookings").select("id").limit(1)),
-    ok(db().from("admin_users").select("id").limit(1)),
-  ]);
-  return [
-    { file: "0001_init.sql", what: "Core tables: leads, campaigns, mailboxes, messages", ok: m1 },
-    { file: "0002_aeo_mentions.sql", what: "AI-mentions audit columns", ok: m2 },
-    { file: "0003_page_note.sql", what: "Personal note on audit pages", ok: m3 },
-    { file: "0004_bookings.sql", what: "Built-in booking page", ok: m4 },
-    { file: "0005_admin_users.sql", what: "Dashboard logins stored in the database", ok: m5 },
-  ];
+async function loadUser() {
+  const id = await sessionUserId((await cookies()).get(SESSION_COOKIE)?.value);
+  if (!id) return null;
+  const { data } = await db().from("admin_users").select("username, updated_at").eq("id", id).maybeSingle();
+  return data;
 }
 
-function Status({ ok, required }: { ok: boolean; required?: boolean }) {
-  if (ok) return <span className="pill good">Connected</span>;
-  return <span className={`pill ${required ? "bad" : ""}`}>{required ? "Missing (required)" : "Not set"}</span>;
-}
-
-function Rows({ rows }: { rows: [string, React.ReactNode][] }) {
-  return (
-    <dl className="kv">
-      {rows.map(([k, v]) => (
-        <div key={k}>
-          <dt>{k}</dt>
-          <dd>{v || <span className="muted">not set</span>}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-export default async function Settings() {
-  const migrations = await migrationStatus();
-  const dbOk = migrations.every((m) => m.ok);
-  const a = availabilityFromEnv();
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const hour = (h: number) => `${String(h).padStart(2, "0")}:00`;
+export default async function Settings({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+  const [{ ok, error }, user] = await Promise.all([searchParams, loadUser()]);
 
   return (
     <>
       <div className="page-head">
         <div>
           <h1>Settings</h1>
-          <p className="muted">
-            How the app is configured. To change anything, edit the environment variables (<code>.env</code> locally, or Vercel →
-            Project Settings → Environment Variables) and redeploy. Secret keys are never shown here.
-          </p>
+          <p className="muted">Manage your login details.</p>
         </div>
       </div>
 
-      <section className="card">
-        <div className="card-head">
-          <h2>Database</h2>
-          {dbOk ? <span className="pill good">Up to date</span> : <span className="pill bad">Setup incomplete</span>}
-        </div>
-        <table className="plain">
-          <tbody>
-            {migrations.map((m) => (
-              <tr key={m.file}>
-                <td>
-                  <code>{m.file}</code>
-                </td>
-                <td className="muted">{m.what}</td>
-                <td style={{ textAlign: "right" }}>{m.ok ? <span className="pill good">Applied</span> : <span className="pill bad">Not run</span>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!dbOk && (
-          <p className="muted small" style={{ marginTop: 12 }}>
-            Open Supabase → SQL Editor → New query, paste the missing files from <code>supabase/migrations/</code>, and click Run.
-          </p>
-        )}
-      </section>
-
-      <section className="card">
-        <div className="card-head">
-          <h2>Integrations</h2>
-          <span className="muted small">{INTEGRATIONS.filter((i) => has(i.key)).length} of {INTEGRATIONS.length} connected</span>
-        </div>
-        <table className="plain">
-          <tbody>
-            {INTEGRATIONS.map((i) => (
-              <tr key={i.key}>
-                <td>
-                  <b>{i.name}</b>
-                  <div className="muted small">{i.use}</div>
-                </td>
-                <td className="muted small">
-                  <code>{i.key}</code>
-                </td>
-                <td style={{ textAlign: "right" }}>
-                  <Status ok={has(i.key)} required={i.required} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      {ok && <div className="form-msg good">{ok}</div>}
+      {error && <div className="form-msg bad">{error}</div>}
 
       <div className="settings-cols">
         <section className="card">
           <div className="card-head">
-            <h2>App</h2>
+            <h2>Profile</h2>
           </div>
-          <Rows
-            rows={[
-              ["Public URL", env.appUrl],
-              ["Dashboard login", "admin_users table (add one with admin_set_password in the SQL editor)"],
-              ["Claude model", env.anthropicModel],
-              ["Cron secret", has("CRON_SECRET") ? "Set" : <span className="pill bad">Missing</span>],
-              ["Weekly report to", env.reportTo()],
-              ["Pipeline", "Every 10 minutes (/api/cron/tick)"],
-              ["Weekly report", "Mondays 07:00 UTC (/api/cron/weekly)"],
-            ]}
-          />
+          <form action={updateUsername}>
+            <label htmlFor="username">Username</label>
+            <input id="username" name="username" defaultValue={user?.username ?? ""} autoComplete="username" required />
+            <label htmlFor="profile_password">Current password</label>
+            <PasswordInput id="profile_password" name="current_password" />
+            <div className="form-foot">
+              <button>Save profile</button>
+            </div>
+          </form>
         </section>
 
         <section className="card">
           <div className="card-head">
-            <h2>Booking page</h2>
+            <h2>Password</h2>
+            {user?.updated_at && <span className="muted small">Last changed {new Date(user.updated_at).toLocaleDateString("en-GB")}</span>}
           </div>
-          <Rows
-            rows={[
-              ["Days", a.days.map((d) => days[d - 1]).join(", ")],
-              ["Hours", `${hour(a.startHour)}–${hour(a.endHour)} (${a.timezone})`],
-              ["Slot length", `${a.slotMinutes} minutes`],
-              ["Minimum notice", `${a.minNoticeHours} hours`],
-              ["Bookable ahead", `${a.daysAhead} days`],
-              ["Video call link", videoUrl()],
-              ["Alerts to", process.env.BOOKING_NOTIFY_EMAIL || env.reportTo()],
-            ]}
-          />
-        </section>
-
-        <section className="card">
-          <div className="card-head">
-            <h2>Brand</h2>
-          </div>
-          <Rows
-            rows={[
-              ["Name", brand.name],
-              ["Tagline", brand.tagline],
-              ["Website", brand.url],
-              ["Signs as", `${brand.person}, ${brand.personRole}`],
-              ["Email", brand.email],
-              ["Phone", brand.phone],
-              ["Footer line", brand.identityLine],
-            ]}
-          />
+          <form action={updatePassword}>
+            <label htmlFor="current_password">Current password</label>
+            <PasswordInput id="current_password" />
+            <label htmlFor="new_password">New password</label>
+            <PasswordInput id="new_password" autoComplete="new-password" minLength={8} />
+            <label htmlFor="confirm_password">Confirm new password</label>
+            <PasswordInput id="confirm_password" autoComplete="new-password" minLength={8} />
+            <div className="form-foot">
+              <button>Change password</button>
+            </div>
+          </form>
         </section>
       </div>
     </>

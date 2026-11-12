@@ -334,8 +334,25 @@ table.data tr:last-child td { border-bottom: 0; }
 /* Brand logo at the top of the sidebar */
 .nav a.nav-brand { display: block; padding: 0 4px; margin-bottom: 20px; }
 .nav a.nav-brand:hover { background: transparent; }
-.nav-brand img { display: block; width: 100%; max-width: 190px; height: auto; }
-.nav-brand span { display: block; margin-top: 2px; padding-left: 2px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.login-logo { display: block; width: 100%; max-width: 220px; height: auto; margin: 0 auto 14px; }
+.nav-brand img { display: block; width: 100%; max-width: 210px; height: auto; }
+.login-logo { display: block; width: 100%; max-width: 260px; height: auto; margin: 0 auto 6px; }
+.login-btn:disabled { opacity: 0.75; cursor: wait; }
 .login-card h1 { text-align: center; }
 .login-card > p.muted { text-align: center; }
+
+/* Logged-in user, above the Log out button */
+.nav-user { display: flex; align-items: center; gap: 10px; padding: 0 4px 12px; }
+.nav-user-avatar { flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.nav-user-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.nav-user-text b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-user-text small { color: var(--muted); font-size: 12px; }
+
+/* Password field with show/hide eye button */
+.password-field { position: relative; }
+.password-field input { width: 100%; padding-right: 44px; }
+.password-toggle { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); margin: 0; padding: 6px; display: grid; place-items: center; background: transparent; border: 0; color: var(--muted); cursor: pointer; border-radius: 6px; }
+.password-toggle:hover { color: var(--ink); background: var(--bg); }
+
+.form-msg { padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid var(--line); }
+.form-msg.good { background: #ecfdf3; border-color: #abefc6; color: #067647; }
+.form-msg.bad { background: #fef3f2; border-color: #fecdca; color: #b42318; }
