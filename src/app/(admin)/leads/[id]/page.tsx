@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { ArrowLeft, Check, ExternalLink, X } from "lucide-react";
 import { notFound } from "next/navigation";
-import { approveOne, confirmPecr, meetingBooked, resetLead, saveDraft } from "@/app/actions";
+import { approveOne, confirmPecr, meetingBooked, resetLead, saveDraft, sendReportAction } from "@/app/actions";
+import { SubmitButton } from "@/components/SubmitButton";
 import { Flash, Pill, Score, fmt } from "@/components/ui";
 import { db, must } from "@/lib/db";
 import { friendlyError } from "@/lib/errors";
+import { reportEmail, reportMailbox } from "@/lib/inbound";
 import type { Lead, Message } from "@/lib/types";
 
 const PROMPT_SOURCE = { website: "from their website", campaign: "campaign", fallback: "generic (couldn't read site)", default: "generic" } as const;
@@ -12,9 +14,14 @@ const PROMPT_SOURCE = { website: "from their website", campaign: "campaign", fal
 export default async function LeadPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string }> }) {
   const { id } = await params;
   const { msg } = await searchParams;
-  const lead = must(await db().from("leads").select("*").eq("id", id).maybeSingle()) as Lead | null;
-  if (!lead) notFound();
-  const [messages, events] = await Promise.all([
+  // One parallel round trip: the lead, its messages, its events and the sending mailbox.
+  const [lead, messages, events, box] = await Promise.all([
+    db()
+      .from("leads")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle()
+      .then((r) => must(r) as Lead | null),
     db()
       .from("messages")
       .select("*")
@@ -28,11 +35,18 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
       .order("created_at", { ascending: false })
       .limit(20)
       .then((r) => must(r) as { type: string; created_at: string }[]),
+    reportMailbox(),
   ]);
+  if (!lead) notFound();
   const editable = messages.filter((m) => m.direction === "out" && ["draft", "scheduled"].includes(m.status));
   const history = messages.filter((m) => !editable.includes(m));
   const name = [lead.first_name, lead.last_name].filter(Boolean).join(" ");
   const aeo = lead.audit?.aeo;
+  // Leads who asked for (or were sent) a report get a reviewable report email. Cold leads use the sequence instead.
+  const canSendReport = !!lead.audit && ["manual", "inbound"].includes(lead.source);
+  const report = canSendReport ? reportEmail(lead) : null;
+  const fromBox = canSendReport ? box : null;
+  const reportSent = events.some((e) => e.type === "report_sent");
 
   return (
     <>
@@ -54,12 +68,12 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           {lead.status === "ready" && (
             <form action={approveOne}>
               <input type="hidden" name="id" value={lead.id} />
-              <button className="btn-primary">Approve and schedule</button>
+              <SubmitButton pending="Scheduling...">Approve and schedule</SubmitButton>
             </form>
           )}
           <form action={meetingBooked}>
             <input type="hidden" name="id" value={lead.id} />
-            <button className="secondary">Mark meeting booked</button>
+            <SubmitButton className="secondary" pending="Saving...">Mark meeting booked</SubmitButton>
           </form>
         </div>
       </div>
@@ -122,6 +136,36 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
         </div>
       )}
 
+      {report && (
+        <form id="send-report" action={sendReportAction} className="card email send-report">
+          <input type="hidden" name="id" value={lead.id} />
+          <div className="email-head">
+            <span className="step">Report email</span>
+            {reportSent ? <span className="pill good">sent before</span> : <span className="pill warn">not sent yet</span>}
+            <a href={`/p/${lead.slug}`} target="_blank" className="small icon-link" style={{ marginLeft: "auto" }}>
+              Preview the report page
+              <ExternalLink size={13} aria-hidden="true" />
+            </a>
+          </div>
+          {fromBox ? (
+            <p className="muted small">
+              From: <b>{fromBox.from_name}</b> &lt;{fromBox.email}&gt;
+            </p>
+          ) : (
+            <p className="row-error">No active mailbox. Add one under Mailboxes before sending.</p>
+          )}
+          <label>To</label>
+          <input name="to" type="email" required defaultValue={lead.email ?? ""} />
+          <label>Subject</label>
+          <input name="subject" required defaultValue={report.subject} />
+          <label>Message</label>
+          <textarea name="body" required style={{ minHeight: 260 }} defaultValue={report.text} />
+          <div className="form-foot">
+            <SubmitButton pending="Sending...">{reportSent ? "Send again" : "Send email"}</SubmitButton>
+          </div>
+        </form>
+      )}
+
       {!lead.pecr_ok && (
         <form action={confirmPecr} className="card callout warn">
           <input type="hidden" name="id" value={lead.id} />
@@ -135,7 +179,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               <option value="company">Limited company / PLC</option>
               <option value="llp">LLP</option>
             </select>
-            <button>I&apos;ve checked: it&apos;s a corporate subscriber</button>
+            <SubmitButton className="" pending="Saving...">I&apos;ve checked: it&apos;s a corporate subscriber</SubmitButton>
           </div>
         </form>
       )}
@@ -160,7 +204,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               <label>Body</label>
               <textarea name="body" style={{ minHeight: 170 }} defaultValue={m.body_text ?? ""} />
               <div className="form-foot">
-                <button className="secondary">Save changes</button>
+                <SubmitButton className="secondary" pending="Saving...">Save changes</SubmitButton>
               </div>
             </form>
           ))}
@@ -299,7 +343,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           <label>Email</label>
           <input name="email" placeholder={lead.email ?? "name@company.co.uk"} />
           <div className="form-foot">
-            <button className="secondary">Reset and re-process</button>
+            <SubmitButton className="secondary" pending="Resetting...">Reset and re-process</SubmitButton>
           </div>
         </form>
       </div>

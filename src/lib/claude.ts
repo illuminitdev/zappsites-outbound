@@ -10,10 +10,35 @@ function claude(): Anthropic {
   return client;
 }
 
-/** Force a JSON result through a single tool call. */
+// Keywords structured outputs rejects; callers validate these in code instead.
+const UNSUPPORTED = new Set(["minItems", "maxItems", "minLength", "maxLength", "minimum", "maximum", "multipleOf", "pattern"]);
+
+/** Make a JSON schema acceptable to structured outputs: every object closed, unsupported limits removed. */
+function strictSchema(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(strictSchema);
+  if (!node || typeof node !== "object") return node;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (UNSUPPORTED.has(k)) continue;
+    out[k] = k === "properties" ? Object.fromEntries(Object.entries(v as object).map(([pk, pv]) => [pk, strictSchema(pv)])) : strictSchema(v);
+  }
+  // `type: ["string", "null"]` -> anyOf, the form structured outputs documents.
+  if (Array.isArray(out.type)) {
+    const { type, ...rest } = out;
+    return { ...rest, anyOf: (type as string[]).map((t) => ({ type: t })) };
+  }
+  if (out.type === "object") out.additionalProperties = false;
+  return out;
+}
+
+/**
+ * Get a JSON result that matches `schema`, via structured outputs.
+ * (Current models reject forced tool calls, which this used to use.)
+ */
 export async function structured<T>(p: {
   system: string;
   prompt: string;
+  /** Kept for callers; only used in error messages now. */
   toolName: string;
   schema: Record<string, unknown>;
   maxTokens?: number;
@@ -21,15 +46,17 @@ export async function structured<T>(p: {
 }): Promise<T> {
   const res = await claude().messages.create({
     model: p.model || env.anthropicModel,
-    max_tokens: p.maxTokens ?? 2000,
+    // Thinking is on by default on current models and counts toward this limit.
+    max_tokens: Math.max(p.maxTokens ?? 0, 16000),
     system: p.system,
-    tools: [{ name: p.toolName, description: "Return the result.", input_schema: p.schema as Anthropic.Tool.InputSchema }],
-    tool_choice: { type: "tool", name: p.toolName },
+    output_config: { format: { type: "json_schema", schema: strictSchema(p.schema) as Record<string, unknown> } },
     messages: [{ role: "user", content: p.prompt }],
   });
-  const block = res.content.find((b) => b.type === "tool_use");
-  if (!block || block.type !== "tool_use") throw new Error("Claude returned no structured result");
-  return block.input as T;
+  if (res.stop_reason === "refusal") throw new Error(`Claude declined to write the ${p.toolName}`);
+  if (res.stop_reason === "max_tokens") throw new Error(`Claude ran out of room writing the ${p.toolName}`);
+  const text = res.content.find((b) => b.type === "text");
+  if (!text || text.type !== "text") throw new Error("Claude returned no structured result");
+  return JSON.parse(text.text) as T;
 }
 
 export const AUDIT_TOKEN = "[AUDIT_LINK]";

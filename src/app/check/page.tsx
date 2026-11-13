@@ -4,6 +4,7 @@ import { GoogleTag } from "@/components/GoogleTag";
 import { brand } from "@/lib/brand";
 import { TRADES, tradeById } from "@/lib/inbound";
 import s from "./check.module.css";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,7 @@ export default async function Check({ searchParams }: { searchParams: Promise<{ 
               <span>Phone (optional)</span>
               <input name="phone" type="tel" autoComplete="tel" />
             </label>
-            <button className={s.btn}>Check my website</button>
+            <SubmitButton className={s.btn} pending="Checking your website...">Check my website</SubmitButton>
             <p className={s.small}>
               We&apos;ll email you the report and may follow up once about it. {brand.identityLine}.
             </p>

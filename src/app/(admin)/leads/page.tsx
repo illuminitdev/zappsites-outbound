@@ -1,37 +1,55 @@
 import Link from "next/link";
-import { Building2, Check, MapPin, Search, Users } from "lucide-react";
-import { approveSelected, importCompaniesHouse, importCsv, importPlaces } from "@/app/actions";
+import { Building2, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, Globe, Mail, MapPin, Search, Send, ThumbsUp, Users, type LucideIcon } from "lucide-react";
+import { approveSelected, createManualAudit, importCompaniesHouse, importCsv, importPlaces } from "@/app/actions";
 import { ModalButton } from "@/components/Modal";
 import { StatusFilter } from "@/components/StatusFilter";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, Flash, Pill, Score } from "@/components/ui";
 import { db, must } from "@/lib/db";
 import { friendlyError } from "@/lib/errors";
+import { leadStatusCounts } from "@/lib/stats";
+import { TRADES } from "@/lib/inbound";
 import type { Lead } from "@/lib/types";
+
+// "Send audit" runs the audit inside the server action, which can take a minute or two.
+export const maxDuration = 300;
+
+const PAGE_SIZE = 10;
+
+const AVATAR_COLORS = ["#fde2c0", "#d9e7ff", "#d5f0e3", "#f9d9e3", "#e6defb", "#fbe9b7"];
+/** Stable pastel colour per company name. */
+function avatarColor(name: string) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
 
 const FILTERS = ["all", "new", "enriched", "audited", "ready", "sequencing", "replied", "interested", "meeting", "error"];
 
-export default async function Leads({ searchParams }: { searchParams: Promise<{ msg?: string; status?: string; q?: string }> }) {
-  const { msg, status = "all", q } = await searchParams;
-  let query = db().from("leads").select("*").order("created_at", { ascending: false }).limit(300);
+export default async function Leads({ searchParams }: { searchParams: Promise<{ msg?: string; status?: string; q?: string; page?: string }> }) {
+  const { msg, status = "all", q, page: pageParam } = await searchParams;
+  const page = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
+  let query = db()
+    .from("leads")
+    .select("*", { count: "exact" })
+    .order("created_at", { ascending: false })
+    .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
   if (status !== "all") query = query.eq("status", status);
   if (q) query = query.or(`company.ilike.%${q.replace(/[%,()]/g, "")}%,domain.ilike.%${q.replace(/[%,()]/g, "")}%`);
-  const head = { count: "exact" as const, head: true };
-  const [leads, campaigns, counts] = await Promise.all([
-    query.then((r) => must(r) as Lead[]),
+  const [{ leads, total }, campaigns, counts] = await Promise.all([
+    query.then((r) => ({ leads: must(r) as Lead[], total: r.count ?? 0 })),
     db()
       .from("campaigns")
       .select("id,name")
       .order("created_at", { ascending: false })
       .then((r) => must(r) as { id: string; name: string }[]),
-    Promise.all(
-      FILTERS.map(async (f) => {
-        const r = await (f === "all" ? db().from("leads").select("id", head) : db().from("leads").select("id", head).eq("status", f));
-        return [f, r.count ?? 0] as const;
-      }),
-    ),
+    leadStatusCounts(),
   ]);
-  const countOf = new Map(counts);
+  const countOf = new Map(counts.byStatus).set("all", counts.total);
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageHref = (n: number) => `/leads?${new URLSearchParams({ status, ...(q ? { q } : {}), ...(n > 1 ? { page: String(n) } : {}) })}`;
+  // Page numbers to show: first, last, and two either side of the current page.
+  const pageNums = Array.from({ length: pages }, (_, i) => i + 1).filter((n) => n === 1 || n === pages || Math.abs(n - page) <= 2);
   const CampaignSelect = () => (
     <select name="campaign_id" defaultValue={campaigns[0]?.id}>
       {campaigns.map((c) => (
@@ -45,16 +63,60 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
   const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   const isReady = status === "ready";
 
+  const quick: { id: string; label: string; icon: LucideIcon; tone: string }[] = [
+    { id: "all", label: "All leads", icon: Users, tone: "grey" },
+    { id: "ready", label: "Ready to approve", icon: CheckCircle2, tone: "orange" },
+    { id: "sequencing", label: "In sequence", icon: Send, tone: "blue" },
+    { id: "interested", label: "Interested", icon: ThumbsUp, tone: "green" },
+    { id: "error", label: "Need fixing", icon: CircleAlert, tone: "red" },
+  ];
+
   const countOptions = FILTERS.map((f) => ({ value: f, count: countOf.get(f) ?? 0 }));
 
   return (
     <>
-      <div className="page-head">
+      <section className="dash-hero leads-hero">
         <div>
           <h1>Leads</h1>
-          <p className="muted">Businesses you&apos;re prospecting. They move through the pipeline automatically; you approve the emails.</p>
+          <p>Businesses you&apos;re prospecting. They move through the pipeline automatically; you approve the emails.</p>
         </div>
         <div className="head-actions">
+          <ModalButton label="Send audit" title="Send a website audit" icon="audit" variant="secondary" size="md">
+            <form action={createManualAudit} className="modal-form">
+              <p className="muted small">We audit the website first. Then you see the email and can edit it before anything is sent.</p>
+              <label>Website to audit</label>
+              <input name="website" required placeholder="northernplumbing.co.uk" />
+              <div className="row">
+                <div>
+                  <label>Business name (optional)</label>
+                  <input name="company" placeholder="Northern Plumbing Ltd" />
+                </div>
+                <div>
+                  <label>Trade</label>
+                  <select name="trade" defaultValue="plumber">
+                    {TRADES.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <label>Town (optional)</label>
+              <input name="town" placeholder="Leeds" />
+              <div className="row">
+                <div>
+                  <label>Send to: name</label>
+                  <input name="name" required placeholder="Ram Karri" />
+                </div>
+                <div>
+                  <label>Send to: email</label>
+                  <input name="email" type="email" required placeholder="ram.karri@illumin-it.co.uk" />
+                </div>
+              </div>
+              <SubmitButton pending="Running audit (up to 2 min)...">Run audit and preview email</SubmitButton>
+            </form>
+          </ModalButton>
           <ModalButton label="Upload CSV" title="Upload leads from CSV" icon="upload" variant="secondary" size="md">
             <form action={importCsv} className="modal-form">
               <p className="muted small">Columns: company, website, email, first name, last name, city, entity type. Each row needs a company plus a website or email.</p>
@@ -113,20 +175,41 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
             </div>
           </ModalButton>
         </div>
-      </div>
+      </section>
       <Flash msg={msg} />
 
-      <div className="toolbar">
+      <div className="leads-stats">
+        {quick.map((k) => (
+          <Link key={k.id} href={k.id === "all" ? "/leads" : `/leads?status=${k.id}`} className={`card leads-stat ${status === k.id ? "on" : ""}`}>
+            <span className={`dash-chip sm ${k.tone}`}>
+              <k.icon size={16} aria-hidden="true" />
+            </span>
+            <span className="leads-stat-text">
+              <b>{countOf.get(k.id) ?? 0}</b>
+              <span>{k.label}</span>
+            </span>
+          </Link>
+        ))}
+      </div>
+
+      <div className="toolbar leads-toolbar">
         <form className="search" action="/leads">
           <input type="hidden" name="status" value={status} />
           <Search size={16} className="search-icon" aria-hidden="true" />
           <input name="q" defaultValue={q} placeholder="Search company or domain…" />
         </form>
-        <StatusFilter status={status} q={q} options={countOptions} />
+        <div className="leads-toolbar-right">
+          {(q || status !== "all") && (
+            <Link href="/leads" className="leads-clear">
+              Clear filters
+            </Link>
+          )}
+          <StatusFilter status={status} q={q} options={countOptions} />
+        </div>
       </div>
 
       <form action={approveSelected}>
-        <div className="card table-card">
+        <div className="card table-card leads-table">
           {leads.length === 0 ? (
             <Empty icon={Users} title={q ? "No leads match your search" : status === "all" ? "No leads yet" : `No leads in “${status}”`}>
               {status === "all" && !q ? "Use Add leads or Upload CSV above to import some." : null}
@@ -141,6 +224,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                   <th>Score</th>
                   <th>PECR</th>
                   <th>Status</th>
+                  <th style={{ width: 40 }} />
                 </tr>
               </thead>
               <tbody>
@@ -148,18 +232,45 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                   <tr key={l.id}>
                     {isReady && <td>{l.status === "ready" && <input type="checkbox" name="lead" value={l.id} disabled={!l.pecr_ok} />}</td>}
                     <td>
-                      <Link href={`/leads/${l.id}`} className="row-title">
-                        {l.company}
-                      </Link>
-                      <div className="muted small">
-                        {l.domain ?? "no website"}
-                        {l.city ? ` · ${l.city}` : ""}
+                      <div className="lead-co">
+                        <span className="lead-avatar" style={{ background: avatarColor(l.company) }}>
+                          {l.company.charAt(0).toUpperCase()}
+                        </span>
+                        <div className="lead-co-text">
+                          <Link href={`/leads/${l.id}`} className="row-title">
+                            {l.company}
+                          </Link>
+                          <div className="muted small lead-meta">
+                            {l.domain ? (
+                              <a href={l.website ?? `https://${l.domain}`} target="_blank" rel="noreferrer" className="lead-meta-item lead-link">
+                                <Globe size={12} aria-hidden="true" />
+                                {l.domain}
+                              </a>
+                            ) : (
+                              <span>no website</span>
+                            )}
+                            {l.city && (
+                              <span className="lead-meta-item">
+                                <MapPin size={12} aria-hidden="true" />
+                                {l.city}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </td>
                     <td>
-                      <div>{[l.first_name, l.last_name].filter(Boolean).join(" ") || <span className="muted">–</span>}</div>
-                      <div className="muted small">
-                        {l.email ?? "no email"} {l.email_status !== "unknown" && <Pill v={l.email_status} />}
+                      <div className="lead-contact-name">{[l.first_name, l.last_name].filter(Boolean).join(" ") || <span className="muted">No name</span>}</div>
+                      <div className="muted small lead-meta">
+                        {l.email ? (
+                          <a href={`mailto:${l.email}`} className="lead-meta-item lead-email lead-link">
+                            <Mail size={12} aria-hidden="true" />
+                            {l.email}
+                          </a>
+                        ) : (
+                          <span>no email</span>
+                        )}
+                        {l.email_status !== "unknown" && <Pill v={l.email_status} />}
                       </div>
                     </td>
                     <td>
@@ -174,19 +285,69 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                         </div>
                       )}
                     </td>
+                    <td>
+                      <Link href={`/leads/${l.id}`} className="lead-open" aria-label={`Open ${l.company}`}>
+                        <ChevronRight size={16} aria-hidden="true" />
+                      </Link>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
         </div>
+        {total > 0 && (
+          <nav className="pager" aria-label="Pages">
+            <span className="muted small">
+              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+            </span>
+            <div className="pager-links">
+              {page > 1 ? (
+                <Link href={pageHref(page - 1)} className="pager-btn">
+                  <ChevronLeft size={16} aria-hidden="true" />
+                  Previous
+                </Link>
+              ) : (
+                <span className="pager-btn disabled">
+                  <ChevronLeft size={16} aria-hidden="true" />
+                  Previous
+                </span>
+              )}
+              {pageNums.map((n, i) => (
+                <span key={n} className="pager-nums">
+                  {i > 0 && n - pageNums[i - 1] > 1 && <span className="muted">…</span>}
+                  {n === page ? (
+                    <span className="pager-num on" aria-current="page">
+                      {n}
+                    </span>
+                  ) : (
+                    <Link href={pageHref(n)} className="pager-num">
+                      {n}
+                    </Link>
+                  )}
+                </span>
+              ))}
+              {page < pages ? (
+                <Link href={pageHref(page + 1)} className="pager-btn">
+                  Next
+                  <ChevronRight size={16} aria-hidden="true" />
+                </Link>
+              ) : (
+                <span className="pager-btn disabled">
+                  Next
+                  <ChevronRight size={16} aria-hidden="true" />
+                </span>
+              )}
+            </div>
+          </nav>
+        )}
         {isReady && leads.length > 0 && (
           <div className="action-bar">
             <span className="muted small">Leads not confirmed as a limited company or LLP can&apos;t be selected. Open them to confirm (PECR).</span>
-            <button className="btn-primary">
+            <SubmitButton pending="Scheduling...">
               <Check size={16} aria-hidden="true" />
               Approve and schedule selected
-            </button>
+            </SubmitButton>
           </div>
         )}
       </form>

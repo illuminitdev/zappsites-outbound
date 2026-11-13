@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { confirmUnsubscribe } from "@/app/actions";
 import { brand } from "@/lib/brand";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Unsubscribe", robots: { index: false, follow: false } };
@@ -22,7 +23,7 @@ export default async function Unsubscribe({ params, searchParams }: { params: Pr
         <form action={confirmUnsubscribe}>
           <h1 style={{ fontSize: 22 }}>Stop emails from {brand.name}?</h1>
           <input type="hidden" name="slug" value={slug} />
-          <button style={{ background: brand.accent }}>Yes, unsubscribe me</button>
+          <SubmitButton className="" style={{ background: brand.accent }} pending="Unsubscribing...">Yes, unsubscribe me</SubmitButton>
         </form>
       )}
     </main>

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { Server } from "lucide-react";
+import { GoogleIcon, MicrosoftIcon } from "./ProviderIcons";
 import { saveMailbox } from "@/app/actions";
 import { SubmitButton } from "./SubmitButton";
 
@@ -16,11 +18,11 @@ export type MailboxDefaults = {
   daily_limit: number;
 };
 
-const PROVIDERS = [
-  { value: "google", label: "Google Workspace / Gmail", help: "Use an app password: Google Account → Security → 2-Step Verification → App passwords." },
-  { value: "microsoft", label: "Microsoft 365 / Outlook", help: "SMTP AUTH must be enabled for this mailbox in the Microsoft 365 admin centre." },
-  { value: "other", label: "Other (custom SMTP / IMAP)", help: "Get the server details from your email provider." },
-] as const;
+const PROVIDERS: { value: string; label: string; icon: ReactNode; help: string }[] = [
+  { value: "google", label: "Google Workspace / Gmail", icon: <GoogleIcon />, help: "Use an app password: Google Account → Security → 2-Step Verification → App passwords." },
+  { value: "microsoft", label: "Microsoft 365 / Outlook", icon: <MicrosoftIcon />, help: "SMTP AUTH must be enabled for this mailbox in the Microsoft 365 admin centre." },
+  { value: "other", label: "Other (custom SMTP / IMAP)", icon: <Server size={20} aria-hidden="true" />, help: "Use the mailbox's normal login password and the server details from your email host." },
+];
 
 function providerOf(m?: MailboxDefaults) {
   if (!m) return "google";
@@ -44,7 +46,8 @@ export function MailboxForm({ mailbox }: { mailbox?: MailboxDefaults }) {
       <div className="provider-pick">
         {PROVIDERS.map((p) => (
           <button type="button" key={p.value} className={provider === p.value ? "on" : undefined} onClick={() => setProvider(p.value)}>
-            {p.label}
+            <span className="provider-icon">{p.icon}</span>
+            <span>{p.label}</span>
           </button>
         ))}
       </div>
@@ -62,8 +65,8 @@ export function MailboxForm({ mailbox }: { mailbox?: MailboxDefaults }) {
       </div>
       <div className="row">
         <div>
-          <label>App password</label>
-          <input name="smtp_pass" type="password" required={!editing} autoComplete="new-password" placeholder={editing ? "Leave blank to keep current" : "xxxx xxxx xxxx xxxx"} />
+          <label>{provider === "other" ? "Email password" : "App password"}</label>
+          <input name="smtp_pass" type="password" required={!editing} autoComplete="new-password" placeholder={editing ? "Leave blank to keep current" : provider === "other" ? "The mailbox's login password" : "xxxx xxxx xxxx xxxx"} />
         </div>
         <div>
           <label>Daily cold-email limit</label>

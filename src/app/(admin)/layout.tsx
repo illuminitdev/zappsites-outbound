@@ -4,7 +4,9 @@ import { NavLinks } from "@/components/NavLinks";
 import { Topbar, type Notification } from "@/components/Topbar";
 import { logout } from "@/app/login/actions";
 import { db } from "@/lib/db";
+import { leadStatusCounts } from "@/lib/stats";
 import { SESSION_COOKIE, sessionUserId } from "@/lib/session";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +18,9 @@ async function loadNotifications(): Promise<Notification[]> {
   };
   const head = { count: "exact" as const, head: true };
   const now = new Date();
-  const [replies, ready, errors, calls] = await Promise.all([
+  const [replies, { byStatus }, calls] = await Promise.all([
     count(db().from("messages").select("id", head).eq("direction", "in").eq("handled", false)),
-    count(db().from("leads").select("id", head).eq("status", "ready")),
-    count(db().from("leads").select("id", head).eq("status", "error")),
+    leadStatusCounts(),
     count(
       db()
         .from("bookings")
@@ -29,6 +30,8 @@ async function loadNotifications(): Promise<Notification[]> {
         .lte("start_at", new Date(now.getTime() + 86400_000).toISOString()),
     ),
   ]);
+  const ready = byStatus.get("ready") ?? 0;
+  const errors = byStatus.get("error") ?? 0;
   const s = (n: number) => (n === 1 ? "" : "s");
   const out: Notification[] = [];
   if (replies) out.push({ id: "replies", label: `${replies} repl${replies === 1 ? "y" : "ies"} waiting`, detail: "Read and answer in the inbox", href: "/inbox", count: replies, tone: "info" });
@@ -68,10 +71,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               </span>
             </div>
           )}
-          <button className="secondary">
+          <SubmitButton className="secondary" pending="Logging out...">
             <LogOut size={16} aria-hidden="true" />
             Log out
-          </button>
+          </SubmitButton>
         </form>
       </nav>
       <div className="content">

@@ -3,6 +3,7 @@ import { PasswordInput } from "@/app/login/PasswordInput";
 import { db } from "@/lib/db";
 import { SESSION_COOKIE, sessionUserId } from "@/lib/session";
 import { updatePassword, updateUsername } from "./actions";
+import { SubmitButton } from "@/components/SubmitButton";
 
 async function loadUser() {
   const id = await sessionUserId((await cookies()).get(SESSION_COOKIE)?.value);
@@ -37,7 +38,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
             <label htmlFor="profile_password">Current password</label>
             <PasswordInput id="profile_password" name="current_password" />
             <div className="form-foot">
-              <button>Save profile</button>
+              <SubmitButton className="" pending="Saving...">Save profile</SubmitButton>
             </div>
           </form>
         </section>
@@ -55,7 +56,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
             <label htmlFor="confirm_password">Confirm new password</label>
             <PasswordInput id="confirm_password" autoComplete="new-password" minLength={8} />
             <div className="form-foot">
-              <button>Change password</button>
+              <SubmitButton className="" pending="Changing...">Change password</SubmitButton>
             </div>
           </form>
         </section>

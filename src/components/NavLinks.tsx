@@ -22,7 +22,7 @@ export function NavLinks() {
       {LINKS.map(({ href, label, icon: Icon }) => {
         const active = isActive(href);
         return (
-          <Link key={href} href={href} className={active ? "active" : undefined} aria-current={active ? "page" : undefined}>
+          <Link key={href} href={href} prefetch className={active ? "active" : undefined} aria-current={active ? "page" : undefined}>
             <Icon size={18} strokeWidth={2} aria-hidden="true" />
             {label}
           </Link>

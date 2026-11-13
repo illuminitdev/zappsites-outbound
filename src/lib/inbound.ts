@@ -91,24 +91,50 @@ export async function runInboundAudit(lead: Lead, tradeId: string) {
   }
 }
 
-async function emailReport(lead: Lead) {
-  const box = (must(await db().from("mailboxes").select("*").eq("active", true).order("created_at").limit(1)) as Mailbox[])[0];
-  if (!box || !lead.email) return;
+/** The email that delivers a lead's audit report. Used as-is for /check, and as the editable preview in the admin. */
+export function reportEmail(lead: Lead): { subject: string; text: string } {
   const top = lead.audit?.topIssues?.[0];
   const link = `${env.appUrl}/p/${lead.slug}`;
-  await sendMail(box, {
-    to: lead.email,
+  return {
     subject: `your website check for ${lead.domain}`,
     text: `Hi ${lead.first_name ?? "there"},
 
 Here's the report for ${lead.domain}:
 ${link}
 
-${top ? `The first thing I'd look at: ${top.label.toLowerCase()}. ${top.detail}\n\n` : ""}If you want to go through it, grab 15 minutes here: ${env.appUrl}/book/${lead.slug}
+${top ? `The first thing I'd look at is "${top.label}". ${top.detail.replace(/^(No|Yes)\.\s*/i, "")}\n\n` : ""}If you want to go through it, grab 15 minutes here: ${env.appUrl}/book/${lead.slug}
 
 ${brand.person}
 ${brand.name} · ${brand.phone}
 
 ${brand.identityLine}. You're getting this because you asked for a website check.`,
+  };
+}
+
+/** The mailbox reports are sent from: the oldest active one. */
+export async function reportMailbox(): Promise<Mailbox | null> {
+  return (must(await db().from("mailboxes").select("*").eq("active", true).order("created_at").limit(1)) as Mailbox[])[0] ?? null;
+}
+
+/** Send a report email and record it on the lead's conversation. */
+export async function sendReport(lead: Lead, mail: { to: string; subject: string; text: string }) {
+  const box = await reportMailbox();
+  if (!box) throw new Error("No active mailbox. Add one under Mailboxes first.");
+  const messageId = await sendMail(box, { to: mail.to, subject: mail.subject, text: mail.text });
+  await db().from("messages").insert({
+    lead_id: lead.id,
+    mailbox_id: box.id,
+    direction: "out",
+    subject: mail.subject,
+    body_text: mail.text,
+    message_id: messageId,
+    status: "sent",
+    sent_at: new Date().toISOString(),
   });
+  await db().from("events").insert({ lead_id: lead.id, type: "report_sent", meta: { to: mail.to } });
+}
+
+async function emailReport(lead: Lead) {
+  if (!lead.email || !(await reportMailbox())) return;
+  await sendReport(lead, { to: lead.email, ...reportEmail(lead) });
 }

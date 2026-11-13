@@ -5,6 +5,7 @@ import { openSlots, videoUrl } from "@/lib/booking";
 import { brand } from "@/lib/brand";
 import type { Lead } from "@/lib/types";
 import s from "./book.module.css";
+import { SubmitButton } from "@/components/SubmitButton";
 
 /** Shared booking page: /book (anyone) and /book/<lead slug> (prefilled from the audit). */
 export async function BookingPage({ lead, day, error, base }: { lead: Lead | null; day?: string; error?: string; base: string }) {
@@ -108,7 +109,7 @@ export async function BookingPage({ lead, day, error, base }: { lead: Lead | nul
                 <span>Anything you&apos;d like me to look at first? (optional)</span>
                 <textarea name="note" />
               </label>
-              <button className={s.btn}>Confirm call</button>
+              <SubmitButton className={s.btn} pending="Booking...">Confirm call</SubmitButton>
               <p className={s.small}>You&apos;ll get a calendar invite by email straight away.</p>
             </div>
           )}

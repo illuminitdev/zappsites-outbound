@@ -5,7 +5,8 @@ import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { db, must } from "@/lib/db";
 import { createBooking } from "@/lib/booking";
-import { createInboundCheck, runInboundAudit } from "@/lib/inbound";
+import { createInboundCheck, runInboundAudit, sendReport, tradeById } from "@/lib/inbound";
+import { runAudit } from "@/lib/audit";
 import { parseLeadsCsv } from "@/lib/leads/csv";
 import { verifySmtp } from "@/lib/mail/send";
 import {
@@ -18,7 +19,7 @@ import {
   tick,
   unsubscribeBySlug,
 } from "@/lib/pipeline";
-import type { Step } from "@/lib/types";
+import type { Lead, Step } from "@/lib/types";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 const back = (path: string, msg: string) => redirect(`${path}?msg=${encodeURIComponent(msg)}`);
@@ -202,6 +203,57 @@ export async function meetingBooked(f: FormData) {
   const id = str(f, "id");
   await markMeeting(id);
   back(`/leads/${id}`, "Marked as meeting booked; sequence stopped");
+}
+
+// ---- manual audit (admin): run it, preview the email, then send ----
+
+export async function createManualAudit(f: FormData) {
+  let target: string;
+  try {
+    const lead = await createInboundCheck({
+      website: str(f, "website"),
+      company: str(f, "company"),
+      trade: str(f, "trade"),
+      town: str(f, "town"),
+      name: str(f, "name"),
+      email: str(f, "email"),
+      phone: null,
+      gclid: null,
+    });
+    must(await db().from("leads").update({ source: "manual" }).eq("id", lead.id));
+    const trade = tradeById(str(f, "trade"));
+    try {
+      const audit = await runAudit(lead.website!, { company: lead.company, domain: lead.domain, city: lead.city, category: trade?.category ?? "" });
+      must(
+        await db()
+          .from("leads")
+          .update({ audit, audit_score: audit.score, audited_at: audit.fetchedAt, aeo_mention_rate: audit.aeo?.mentionRate ?? null, status: "audited" })
+          .eq("id", lead.id),
+      );
+      target = `/leads/${lead.id}?msg=${encodeURIComponent("Audit ready. Check the email below, then send it.")}#send-report`;
+    } catch (e) {
+      await db().from("leads").update({ status: "error", last_error: `Audit: ${(e as Error).message}` }).eq("id", lead.id);
+      target = `/leads/${lead.id}?msg=${encodeURIComponent("The audit failed. See the error on this page.")}`;
+    }
+  } catch (e) {
+    return back("/leads", `Couldn't start the audit: ${(e as Error).message}`);
+  }
+  redirect(target);
+}
+
+export async function sendReportAction(f: FormData) {
+  const id = str(f, "id");
+  try {
+    const to = str(f, "to").toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new Error("Enter a valid recipient email");
+    if (!str(f, "subject") || !str(f, "body")) throw new Error("Subject and message can't be empty");
+    const lead = must(await db().from("leads").select("*").eq("id", id).single()) as Lead;
+    await sendReport(lead, { to, subject: str(f, "subject"), text: String(f.get("body") ?? "") });
+  } catch (e) {
+    return back(`/leads/${id}`, `Not sent: ${(e as Error).message}`);
+  }
+  revalidatePath(`/leads/${id}`);
+  back(`/leads/${id}`, "Report email sent");
 }
 
 // ---- inbox ----

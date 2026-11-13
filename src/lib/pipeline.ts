@@ -555,7 +555,8 @@ export async function weeklyStats(days = 7) {
   };
   const m = () => db().from("messages").select("id", { count: "exact", head: true });
   const [sent, replies, interested, meetings, views, clicks, bounces] = await Promise.all([
-    count(m().eq("direction", "out").eq("status", "sent").not("step", "is", null).gte("sent_at", since)),
+    // Every email that went out: sequence steps, inbox replies and audit report emails.
+    count(m().eq("direction", "out").eq("status", "sent").gte("sent_at", since)),
     count(m().eq("direction", "in").neq("classification", "bounce").neq("classification", "out_of_office").gte("received_at", since)),
     count(m().eq("direction", "in").eq("classification", "interested").gte("received_at", since)),
     count(db().from("events").select("id", { count: "exact", head: true }).eq("type", "meeting_booked").gte("created_at", since)),
