@@ -114,7 +114,13 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                   <input name="email" type="email" required placeholder="ram.karri@illumin-it.co.uk" />
                 </div>
               </div>
-              <SubmitButton pending="Running audit (up to 2 min)...">Run audit and preview email</SubmitButton>
+              <label className="toggle">
+                <input type="checkbox" name="fresh" />
+                <span>
+                  Run a fresh audit <span className="muted small">(otherwise an existing audit for this website is reused, at no cost)</span>
+                </span>
+              </label>
+              <SubmitButton pending="Preparing audit (up to 2 min)...">Run audit and preview email</SubmitButton>
             </form>
           </ModalButton>
           <ModalButton label="Upload CSV" title="Upload leads from CSV" icon="upload" variant="secondary" size="md">

@@ -7,6 +7,7 @@ import { db, must } from "@/lib/db";
 import { createBooking } from "@/lib/booking";
 import { createInboundCheck, runInboundAudit, sendReport, tradeById } from "@/lib/inbound";
 import { runAudit } from "@/lib/audit";
+import { toDomain } from "@/lib/http";
 import { parseLeadsCsv } from "@/lib/leads/csv";
 import { verifySmtp } from "@/lib/mail/send";
 import {
@@ -207,8 +208,71 @@ export async function meetingBooked(f: FormData) {
 
 // ---- manual audit (admin): run it, preview the email, then send ----
 
+/** Newest lead for this website that already has an audit, so we don't pay for the same audit twice. */
+async function findExistingAudit(website: string): Promise<Lead | null> {
+  const domain = toDomain(website);
+  if (!domain) return null;
+  const rows = must(
+    await db().from("leads").select("*").eq("domain", domain).not("audit", "is", null).order("audited_at", { ascending: false, nullsFirst: false }).limit(1),
+  ) as Lead[];
+  return rows[0] ?? null;
+}
+
 export async function createManualAudit(f: FormData) {
   let target: string;
+  let reused = false;
+  // Reuse an audit we already have for this website (unless "run a fresh audit" is ticked): no PageSpeed/AI costs.
+  if (f.get("fresh") !== "on") {
+    try {
+      const existing = await findExistingAudit(str(f, "website"));
+      if (existing?.audit) {
+        const when = existing.audit.fetchedAt ? new Date(existing.audit.fetchedAt).toLocaleDateString("en-GB", { dateStyle: "medium" }) : "earlier";
+        const msg = encodeURIComponent(`This website was already audited (${when}), so we reused that audit. Check the email below, then send it.`);
+        const [first, ...rest] = str(f, "name").split(/\s+/);
+        const contact = {
+          ...(str(f, "email") ? { email: str(f, "email").toLowerCase(), email_status: "valid" } : {}),
+          ...(first ? { first_name: first, last_name: rest.join(" ") || null } : {}),
+          ...(str(f, "company") ? { company: str(f, "company") } : {}),
+          ...(str(f, "town") ? { city: str(f, "town") } : {}),
+        };
+        if (["manual", "inbound"].includes(existing.source)) {
+          // Same report lead: just update who it goes to.
+          if (Object.keys(contact).length) must(await db().from("leads").update(contact).eq("id", existing.id));
+          target = `/leads/${existing.id}?msg=${msg}#send-report`;
+        } else {
+          // A cold lead has the audit: make a report lead for this person and copy the audit across (no new audit).
+          const lead = await createInboundCheck({
+            website: str(f, "website"),
+            company: str(f, "company") || existing.company,
+            trade: str(f, "trade"),
+            town: str(f, "town") || existing.city || "",
+            name: str(f, "name"),
+            email: str(f, "email"),
+            phone: null,
+            gclid: null,
+          });
+          must(
+            await db()
+              .from("leads")
+              .update({
+                source: "manual",
+                audit: existing.audit,
+                audit_score: existing.audit_score,
+                audited_at: existing.audit.fetchedAt,
+                aeo_mention_rate: existing.audit.aeo?.mentionRate ?? null,
+                status: "audited",
+              })
+              .eq("id", lead.id),
+          );
+          target = `/leads/${lead.id}?msg=${msg}#send-report`;
+        }
+        reused = true;
+      }
+    } catch (e) {
+      return back("/leads", `Couldn't start the audit: ${(e as Error).message}`);
+    }
+    if (reused) redirect(target!);
+  }
   try {
     const lead = await createInboundCheck({
       website: str(f, "website"),
