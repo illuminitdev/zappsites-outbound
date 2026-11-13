@@ -883,3 +883,10 @@ a.ld-contact-line:hover { text-decoration: none; background: var(--accent-soft);
   .am-foot { flex-direction: column-reverse; align-items: stretch; }
   .modal-form.am .am-foot button { width: 100%; }
 }
+
+/* ---- Lead page: run audit now + report email notes ---- */
+.audit-now { border-color: var(--accent-line); background: linear-gradient(180deg, var(--accent-faint), var(--card) 70%); }
+.audit-now-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap; margin-top: 4px; }
+.audit-now-steps { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; display: grid; gap: 3px; }
+.audit-now-row button { width: auto; display: inline-flex; align-items: center; gap: 6px; }
+.report-note { margin: -4px 0 12px; }

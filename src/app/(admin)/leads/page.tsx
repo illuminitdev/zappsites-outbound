@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { displayScore } from "@/lib/audit/analyze";
 import {
   ArrowRight,
   Building2,
@@ -358,7 +359,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                       </div>
                     </td>
                     <td>
-                      <Score v={l.audit_score} />
+                      <Score v={l.audit?.url && l.audit.reachable ? displayScore(l.audit) : l.audit_score} />
                     </td>
                     <td>{l.pecr_ok ? <span className="pill good">ok</span> : <span className="pill warn">{l.entity_type.replace(/_/g, " ")}</span>}</td>
                     <td>

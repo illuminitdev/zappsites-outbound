@@ -5,6 +5,7 @@ import {
   Bot,
   Check,
   ChevronDown,
+  ClipboardCheck,
   Clock,
   ExternalLink,
   Globe,
@@ -22,12 +23,13 @@ import {
   X,
 } from "lucide-react";
 import { notFound } from "next/navigation";
-import { approveOne, confirmPecr, meetingBooked, resetLead, saveDraft, sendReportAction } from "@/app/actions";
+import { approveOne, auditLeadNow, confirmPecr, meetingBooked, resetLead, saveDraft, sendReportAction } from "@/app/actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Flash, Pill, fmt } from "@/components/ui";
 import { db, must } from "@/lib/db";
 import { friendlyError } from "@/lib/errors";
-import { reportEmail, reportMailbox } from "@/lib/inbound";
+import { displayScore } from "@/lib/audit/analyze";
+import { askedForReport, reportEmail, reportMailbox } from "@/lib/inbound";
 import type { AuditCheck, Lead, Message } from "@/lib/types";
 
 const PROMPT_SOURCE = { website: "from their website", campaign: "campaign", fallback: "generic (couldn't read site)", default: "generic" } as const;
@@ -109,8 +111,10 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const name = [lead.first_name, lead.last_name].filter(Boolean).join(" ");
   const audit = lead.audit;
   const aeo = audit?.aeo;
-  // Leads who asked for (or were sent) a report get a reviewable report email. Cold leads use the sequence instead.
-  const canSendReport = !!audit && ["manual", "inbound"].includes(lead.source);
+  // Every audited lead gets a reviewable report email: found leads can be sent their audit straight away.
+  const canSendReport = !!audit;
+  const cold = !askedForReport(lead);
+  const contacted = !["new", "enriched", "audited", "ready", "error"].includes(lead.status);
   const report = canSendReport ? reportEmail(lead) : null;
   const fromBox = canSendReport ? box : null;
   const reportSent = events.some((e) => e.type === "report_sent");
@@ -162,10 +166,21 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           </div>
         </div>
         <div className="head-actions">
-          <a href={`/p/${lead.slug}`} target="_blank" rel="noreferrer" className="btn-link btn-outline">
-            <ExternalLink size={15} aria-hidden="true" />
-            Audit page
-          </a>
+          {audit && (
+            <a href={`/p/${lead.slug}`} target="_blank" rel="noreferrer" className="btn-link btn-outline">
+              <ExternalLink size={15} aria-hidden="true" />
+              Audit page
+            </a>
+          )}
+          {audit && lead.website && (
+            <form action={auditLeadNow}>
+              <input type="hidden" name="id" value={lead.id} />
+              <SubmitButton className="secondary" pending="Re-auditing (up to 2 min)...">
+                <RotateCcw size={15} aria-hidden="true" />
+                Re-run audit
+              </SubmitButton>
+            </form>
+          )}
           <form action={meetingBooked}>
             <input type="hidden" name="id" value={lead.id} />
             <SubmitButton className="secondary" pending="Saving...">
@@ -232,6 +247,38 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </div>
           )}
 
+          {!audit && (
+            <section className="card ld-panel audit-now">
+              <div className="ld-panel-head">
+                <span className="dash-chip sm orange">
+                  <ClipboardCheck size={16} aria-hidden="true" />
+                </span>
+                <div className="ld-panel-title">
+                  <h2>Audit report</h2>
+                  <span>
+                    {lead.website
+                      ? "Not audited yet. Run it now to get their report page and a ready-to-send email."
+                      : "This lead has no website to audit. Add one with 'Fix and retry', then run the audit."}
+                  </span>
+                </div>
+              </div>
+              {lead.website && (
+                <form action={auditLeadNow} className="audit-now-row">
+                  <input type="hidden" name="id" value={lead.id} />
+                  <ol className="audit-now-steps">
+                    <li>Speed on a phone (Google PageSpeed)</li>
+                    <li>What Google sees: title, headings, sitemap, HTTPS</li>
+                    <li>Whether AI assistants can read and recommend them</li>
+                  </ol>
+                  <SubmitButton pending="Auditing (up to 2 min)...">
+                    <ClipboardCheck size={15} aria-hidden="true" />
+                    Run audit now
+                  </SubmitButton>
+                </form>
+              )}
+            </section>
+          )}
+
           {report && (
             <form id="send-report" action={sendReportAction} className="card ld-panel send-report">
               <input type="hidden" name="id" value={lead.id} />
@@ -251,6 +298,12 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                 </div>
                 {reportSent ? <span className="pill good">sent before</span> : <span className="pill warn">not sent yet</span>}
               </div>
+              {cold && !contacted && (editable.length > 0 || lead.status === "audited") && (
+                <p className="small muted report-note">
+                  Sending this report counts as the first email: any unsent sequence emails for this lead are cancelled.
+                </p>
+              )}
+              {cold && !lead.pecr_ok && <p className="small row-error report-note">Confirm the PECR check above before sending to a cold lead.</p>}
               <div className="ld-fields">
                 <div>
                   <label>To</label>
@@ -563,7 +616,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               Audit score
             </h2>
             <div className="ld-score">
-              <ScoreRing v={lead.audit_score} label="Audit score" />
+              <ScoreRing v={audit && audit.url && audit.reachable ? displayScore(audit) : lead.audit_score} label="Audit score" />
               <div className="ld-score-stats">
                 <div>
                   <span>Mobile speed</span>

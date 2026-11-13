@@ -1,4 +1,4 @@
-import type { AuditCheck } from "../types";
+import type { Audit, AuditCheck } from "../types";
 
 /** Pure HTML/robots analysis. No network: easy to test. */
 export interface PageFacts {
@@ -214,7 +214,19 @@ export function analyzePage(f: PageFacts): AuditCheck[] {
 
 const WEIGHT = { high: 3, medium: 2, low: 1 } as const;
 
-/** 0-100 from checks plus optional Lighthouse mobile score (weighted as a high-impact check x2). */
+/** Highest score a site can get while any high-impact problem is still open. */
+export const HIGH_ISSUE_CEILING = 69;
+
+/** True when a high-impact check fails or Google rates mobile speed below 50. */
+export function hasHighImpactIssue(checks: AuditCheck[], mobileScore: number | null): boolean {
+  return checks.some((c) => !c.pass && c.impact === "high") || (mobileScore !== null && mobileScore < 50);
+}
+
+/**
+ * 0-100 from checks plus optional Lighthouse mobile score (weighted as a high-impact check x2).
+ * A site with any high-impact problem (not recommended by AI, slow on phones, no HTTPS...) can't score
+ * above HIGH_ISSUE_CEILING: a high number should mean there's nothing serious left to fix.
+ */
 export function scoreAudit(checks: AuditCheck[], mobileScore: number | null): number {
   let total = 0;
   let got = 0;
@@ -226,7 +238,13 @@ export function scoreAudit(checks: AuditCheck[], mobileScore: number | null): nu
     total += 6;
     got += (mobileScore / 100) * 6;
   }
-  return total ? Math.round((got / total) * 100) : 0;
+  const raw = total ? Math.round((got / total) * 100) : 0;
+  return hasHighImpactIssue(checks, mobileScore) ? Math.min(raw, HIGH_ISSUE_CEILING) : raw;
+}
+
+/** The score to show for a saved audit (applies the ceiling to audits saved before it existed). */
+export function displayScore(a: Pick<Audit, "score" | "checks" | "performance">): number {
+  return hasHighImpactIssue(a.checks, a.performance?.mobileScore ?? null) ? Math.min(a.score, HIGH_ISSUE_CEILING) : a.score;
 }
 
 export function topIssues(checks: AuditCheck[], n = 3): AuditCheck[] {

@@ -5,8 +5,9 @@ import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { db, must } from "@/lib/db";
 import { createBooking } from "@/lib/booking";
-import { createInboundCheck, runInboundAudit, sendReport, tradeById } from "@/lib/inbound";
+import { askedForReport, createInboundCheck, runInboundAudit, sendReport, tradeById } from "@/lib/inbound";
 import { runAudit } from "@/lib/audit";
+import { getCampaign } from "@/lib/pipeline";
 import { toDomain } from "@/lib/http";
 import { parseLeadsCsv } from "@/lib/leads/csv";
 import { verifySmtp } from "@/lib/mail/send";
@@ -305,6 +306,36 @@ export async function createManualAudit(f: FormData) {
   redirect(target);
 }
 
+/** Audit a found lead right now (instead of waiting for the cron), so its report can be emailed straight away. */
+export async function auditLeadNow(f: FormData) {
+  const id = str(f, "id");
+  try {
+    const lead = must(await db().from("leads").select("*").eq("id", id).single()) as Lead;
+    if (!lead.website) throw new Error("This lead has no website. Add one with 'Fix and retry' first.");
+    const campaign = await getCampaign(lead.campaign_id);
+    const audit = await runAudit(lead.website, {
+      company: lead.company,
+      domain: lead.domain,
+      city: lead.city,
+      category: campaign?.aeo_category?.trim() ?? "",
+      prompts: campaign?.aeo_prompts,
+    });
+    const patch: Record<string, unknown> = {
+      audit,
+      audit_score: audit.score,
+      audited_at: audit.fetchedAt,
+      aeo_mention_rate: audit.aeo?.mentionRate ?? null,
+      last_error: null,
+    };
+    if (["new", "enriched", "error"].includes(lead.status)) patch.status = "audited";
+    must(await db().from("leads").update(patch).eq("id", id));
+  } catch (e) {
+    return back(`/leads/${id}`, `Audit failed: ${(e as Error).message}`);
+  }
+  revalidatePath(`/leads/${id}`);
+  redirect(`/leads/${id}?msg=${encodeURIComponent("Audit ready. Check the report email below, then send it.")}#send-report`);
+}
+
 export async function sendReportAction(f: FormData) {
   const id = str(f, "id");
   try {
@@ -312,6 +343,7 @@ export async function sendReportAction(f: FormData) {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new Error("Enter a valid recipient email");
     if (!str(f, "subject") || !str(f, "body")) throw new Error("Subject and message can't be empty");
     const lead = must(await db().from("leads").select("*").eq("id", id).single()) as Lead;
+    if (!askedForReport(lead) && !lead.pecr_ok) throw new Error("confirm this is a limited company or LLP (PECR check above) before emailing it");
     await sendReport(lead, { to, subject: str(f, "subject"), text: String(f.get("body") ?? "") });
   } catch (e) {
     return back(`/leads/${id}`, `Not sent: ${(e as Error).message}`);

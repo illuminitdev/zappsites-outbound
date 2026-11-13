@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { displayScore } from "./audit/analyze";
 import { env } from "./env";
 import { brand } from "./brand";
 import { bannedFound, humanise, humaniseSubject } from "./sequence/humanise";
@@ -80,7 +81,7 @@ function auditSummary(a: Audit | null): string {
       ].filter(Boolean)
     : [];
   return [
-    a.url ? `Overall score ${a.score}/100. ${perf}` : "No website found.",
+    a.url ? `Overall score ${displayScore(a)}/100. ${perf}` : "No website found.",
     fails.length ? `Problems found:\n${fails.join("\n")}` : "No problems found.",
     `Passed: ${passes.join(", ") || "none"}.`,
     ...aeo,
