@@ -1,5 +1,24 @@
 import Link from "next/link";
-import { Building2, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, Globe, Mail, MapPin, Search, Send, ThumbsUp, Users, type LucideIcon } from "lucide-react";
+import {
+  ArrowRight,
+  Building2,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Globe,
+  Mail,
+  MapPin,
+  RefreshCw,
+  Search,
+  Send,
+  ShieldCheck,
+  ThumbsUp,
+  UserRound,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import { approveSelected, createManualAudit, importCompaniesHouse, importCsv, importPlaces } from "@/app/actions";
 import { ModalButton } from "@/components/Modal";
 import { StatusFilter } from "@/components/StatusFilter";
@@ -82,45 +101,104 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
         </div>
         <div className="head-actions">
           <ModalButton label="Send audit" title="Send a website audit" icon="audit" variant="secondary" size="md">
-            <form action={createManualAudit} className="modal-form">
-              <p className="muted small">We audit the website first. Then you see the email and can edit it before anything is sent.</p>
-              <label>Website to audit</label>
-              <input name="website" required placeholder="northernplumbing.co.uk" />
-              <div className="row">
-                <div>
-                  <label>Business name (optional)</label>
-                  <input name="company" placeholder="Northern Plumbing Ltd" />
+            <form action={createManualAudit} className="modal-form am">
+              <ol className="am-steps" aria-label="How it works">
+                <li className="on">
+                  <span>1</span>Audit website
+                </li>
+                <li>
+                  <span>2</span>Review email
+                </li>
+                <li>
+                  <span>3</span>Send
+                </li>
+              </ol>
+
+              <fieldset className="am-section">
+                <legend>
+                  <Building2 size={15} aria-hidden="true" />
+                  The business
+                </legend>
+                <label htmlFor="am-website">
+                  Website <em>required</em>
+                </label>
+                <div className="am-input am-input-lg">
+                  <Globe size={17} aria-hidden="true" />
+                  <input id="am-website" name="website" required placeholder="northernplumbing.co.uk" autoComplete="off" />
                 </div>
-                <div>
-                  <label>Trade</label>
-                  <select name="trade" defaultValue="plumber">
-                    {TRADES.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
+                <div className="am-grid3">
+                  <div>
+                    <label htmlFor="am-company">Business name</label>
+                    <input id="am-company" name="company" placeholder="Northern Plumbing Ltd" />
+                  </div>
+                  <div>
+                    <label htmlFor="am-trade">Trade</label>
+                    <select id="am-trade" name="trade" defaultValue="plumber">
+                      {TRADES.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="am-town">Town</label>
+                    <div className="am-input">
+                      <MapPin size={15} aria-hidden="true" />
+                      <input id="am-town" name="town" placeholder="Leeds" />
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <label>Town (optional)</label>
-              <input name="town" placeholder="Leeds" />
-              <div className="row">
-                <div>
-                  <label>Send to: name</label>
-                  <input name="name" required placeholder="Ram Karri" />
+              </fieldset>
+
+              <fieldset className="am-section">
+                <legend>
+                  <Send size={15} aria-hidden="true" />
+                  Send the report to
+                </legend>
+                <div className="am-grid2">
+                  <div>
+                    <label htmlFor="am-name">
+                      Name <em>required</em>
+                    </label>
+                    <div className="am-input">
+                      <UserRound size={15} aria-hidden="true" />
+                      <input id="am-name" name="name" required placeholder="Ram Karri" />
+                    </div>
+                  </div>
+                  <div>
+                    <label htmlFor="am-email">
+                      Email <em>required</em>
+                    </label>
+                    <div className="am-input">
+                      <Mail size={15} aria-hidden="true" />
+                      <input id="am-email" name="email" type="email" required placeholder="ram@company.co.uk" />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label>Send to: email</label>
-                  <input name="email" type="email" required placeholder="ram.karri@illumin-it.co.uk" />
-                </div>
-              </div>
-              <label className="toggle">
+              </fieldset>
+
+              <label className="am-fresh">
                 <input type="checkbox" name="fresh" />
-                <span>
-                  Run a fresh audit <span className="muted small">(otherwise an existing audit for this website is reused, at no cost)</span>
+                <span className="am-fresh-text">
+                  <b>
+                    <RefreshCw size={14} aria-hidden="true" />
+                    Run a fresh audit
+                  </b>
+                  <small>Off: if this website was audited before, that audit is reused (instant, no cost).</small>
                 </span>
               </label>
-              <SubmitButton pending="Preparing audit (up to 2 min)...">Run audit and preview email</SubmitButton>
+
+              <div className="am-foot">
+                <span className="am-note">
+                  <ShieldCheck size={14} aria-hidden="true" />
+                  Nothing is sent yet. You review the email first.
+                </span>
+                <SubmitButton pending="Preparing audit (up to 2 min)...">
+                  Run audit and preview email
+                  <ArrowRight size={16} aria-hidden="true" />
+                </SubmitButton>
+              </div>
             </form>
           </ModalButton>
           <ModalButton label="Upload CSV" title="Upload leads from CSV" icon="upload" variant="secondary" size="md">
