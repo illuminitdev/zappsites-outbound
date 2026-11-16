@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, LayoutDashboard, Mail, Megaphone, Settings, Users, type LucideIcon } from "lucide-react";
+import { CalendarCheck, Inbox, LayoutDashboard, Mail, Megaphone, Settings, Users, type LucideIcon } from "lucide-react";
 
 const LINKS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/inbox", label: "Inbox", icon: Inbox },
+  { href: "/bookings", label: "Bookings", icon: CalendarCheck },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/mailboxes", label: "Mailboxes", icon: Mail },
   { href: "/settings", label: "Settings", icon: Settings },

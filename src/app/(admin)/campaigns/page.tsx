@@ -35,6 +35,18 @@ function CampaignForm({ c }: { c?: Campaign }) {
       <input name="aeo_category" defaultValue={c?.aeo_category} placeholder="plumbers in Leeds" />
       <p className="muted small">Used to check if the business shows up when people ask ChatGPT or Google AI. Leave empty to skip.</p>
 
+      <input type="hidden" name="auto_approve_shown" value="1" />
+      <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontWeight: 400, cursor: "pointer" }}>
+        <input type="checkbox" name="auto_approve" defaultChecked={c?.auto_approve ?? false} style={{ marginTop: 3 }} />
+        <span>
+          <b>Send automatically</b>
+          <br />
+          <span className="muted small">
+            Emails Claude writes go out on their own, without you approving each lead. Only limited companies/LLPs are emailed (UK PECR rule).
+          </span>
+        </span>
+      </label>
+
       <div className="form-foot">
         <SubmitButton pending="Saving...">{c ? "Save campaign" : "Create campaign"}</SubmitButton>
       </div>

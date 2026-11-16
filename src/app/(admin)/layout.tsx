@@ -37,7 +37,7 @@ async function loadNotifications(): Promise<Notification[]> {
   const s = (n: number) => (n === 1 ? "" : "s");
   const out: Notification[] = [];
   if (replies) out.push({ id: "replies", label: `${replies} repl${replies === 1 ? "y" : "ies"} waiting`, detail: "Read and answer in the inbox", href: "/inbox", count: replies, tone: "info" });
-  if (calls) out.push({ id: "calls", label: `${calls} call${s(calls)} in the next 24 hours`, detail: "See upcoming calls on the dashboard", href: "/", count: calls, tone: "good" });
+  if (calls) out.push({ id: "calls", label: `${calls} call${s(calls)} in the next 24 hours`, detail: "See them on the Bookings page", href: "/bookings", count: calls, tone: "good" });
   if (ready) out.push({ id: "ready", label: `${ready} lead${s(ready)} ready to approve`, detail: "Review the emails, then approve", href: "/leads?status=ready", count: ready, tone: "warn" });
   if (errors) out.push({ id: "errors", label: `${errors} lead${s(errors)} with errors`, detail: "Fix the website or email, then reset", href: "/leads?status=error", count: errors, tone: "bad" });
   return out;

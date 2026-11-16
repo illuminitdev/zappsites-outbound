@@ -226,11 +226,41 @@ export async function auditLeads(limit = 3) {
 
 // ---------- 4. write ----------
 
+const DEFAULT_CAMPAIGN = "General (automatic)";
+
+/**
+ * Leads uploaded without a campaign go into this one, so every upload gets emailed.
+ * Created on first use with "Send automatically" on; edit or pause it on the Campaigns page like any other.
+ */
+export async function defaultCampaignId(): Promise<string> {
+  const found = must(await db().from("campaigns").select("id").eq("name", DEFAULT_CAMPAIGN).limit(1)) as { id: string }[];
+  if (found[0]) return found[0].id;
+  const created = must(
+    await db()
+      .from("campaigns")
+      .insert({
+        name: DEFAULT_CAMPAIGN,
+        offer: `${brand.name} fixes the website problems that stop small businesses getting enquiries: slow pages, poor mobile layout, weak Google and AI search visibility, and unclear contact details.`,
+        icp: "UK small and medium businesses with a website",
+        booking_url: "",
+        active: true,
+        auto_approve: true,
+      })
+      .select("id")
+      .single(),
+  ) as { id: string };
+  return created.id;
+}
+
 export async function writeEmails(limit = 5) {
-  const leads = must(
-    await db().from("leads").select("*").eq("status", "audited").not("campaign_id", "is", null).order("created_at").limit(limit),
-  ) as Lead[];
+  const leads = must(await db().from("leads").select("*").eq("status", "audited").order("created_at").limit(limit)) as Lead[];
+  let fallback: string | null = null;
   for (const lead of leads) {
+    if (!lead.campaign_id) {
+      fallback ??= await defaultCampaignId();
+      lead.campaign_id = fallback;
+      await setLead(lead.id, { campaign_id: fallback });
+    }
     const campaign = await getCampaign(lead.campaign_id);
     if (!campaign?.active) continue;
     try {
@@ -255,6 +285,20 @@ export async function writeEmails(limit = 5) {
 }
 
 // ---------- 5. approve + schedule ----------
+
+/**
+ * Leads already sitting at "ready" in a campaign that sends automatically (e.g. written before
+ * "Send automatically" was switched on). PECR and suppression checks still apply in approveLeads.
+ */
+export async function autoApproveReady(limit = 20) {
+  const campaigns = must(await db().from("campaigns").select("id").eq("active", true).eq("auto_approve", true)) as { id: string }[];
+  if (!campaigns.length) return 0;
+  const leads = must(
+    await db().from("leads").select("id").eq("status", "ready").eq("pecr_ok", true).in("campaign_id", campaigns.map((c) => c.id)).limit(limit),
+  ) as { id: string }[];
+  if (!leads.length) return 0;
+  return (await approveLeads(leads.map((l) => l.id))).scheduled;
+}
 
 export async function approveLeads(leadIds: string[]): Promise<{ scheduled: number; blocked: string[] }> {
   const blocked: string[] = [];
@@ -613,6 +657,7 @@ export async function tick() {
   await step("enriched", () => enrichLeads());
   await step("audited", () => auditLeads());
   await step("written", () => writeEmails());
+  await step("autoApproved", () => autoApproveReady());
   result.ms = Date.now() - started;
   return result;
 }

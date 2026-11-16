@@ -7,9 +7,9 @@ import type { Lead } from "@/lib/types";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: `Book a call · ${brand.name}`, robots: { index: false, follow: false } };
 
-export default async function BookForLead({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ day?: string; error?: string }> }) {
+export default async function BookForLead({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ day?: string; month?: string; error?: string }> }) {
   const { slug } = await params;
-  const { day, error } = await searchParams;
+  const { day, month, error } = await searchParams;
   const { data: lead } = await db().from("leads").select("*").eq("slug", slug).maybeSingle<Lead>();
-  return <BookingPage lead={lead ?? null} day={day} error={error} base={`/book/${slug}`} />;
+  return <BookingPage lead={lead ?? null} day={day} month={month} error={error} base={`/book/${slug}`} />;
 }

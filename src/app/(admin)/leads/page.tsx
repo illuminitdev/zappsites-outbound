@@ -8,7 +8,9 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  Download,
   Globe,
+  Info,
   Mail,
   MapPin,
   RefreshCw,
@@ -16,12 +18,14 @@ import {
   Send,
   ShieldCheck,
   ThumbsUp,
+  UploadCloud,
   UserRound,
   Users,
   type LucideIcon,
 } from "lucide-react";
 import { approveSelected, createManualAudit, importCompaniesHouse, importCsv, importPlaces } from "@/app/actions";
 import { ModalButton } from "@/components/Modal";
+import { CsvDrop } from "@/components/CsvDrop";
 import { StatusFilter } from "@/components/StatusFilter";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, Flash, Pill, Score } from "@/components/ui";
@@ -77,7 +81,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
           {c.name}
         </option>
       ))}
-      <option value="">(no campaign)</option>
+      <option value="">Automatic (no campaign)</option>
     </select>
   );
   const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
@@ -203,13 +207,52 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
             </form>
           </ModalButton>
           <ModalButton label="Upload CSV" title="Upload leads from CSV" icon="upload" variant="secondary" size="md">
-            <form action={importCsv} className="modal-form">
-              <p className="muted small">Columns: company, website, email, first name, last name, city, entity type. Each row needs a company plus a website or email.</p>
-              <label>File</label>
-              <input type="file" name="file" accept=".csv,text/csv" required />
-              <label>Campaign</label>
-              <CampaignSelect />
-              <SubmitButton pending="Uploading...">Upload</SubmitButton>
+            <form action={importCsv} className="modal-form csv-form">
+              <div className="csv-step">
+                <span className="csv-num">1</span>
+                <b>Choose your file</b>
+              </div>
+              <CsvDrop />
+
+              <div className="csv-cols">
+                <span className="csv-cols-head">
+                  Columns
+                  <a href="/leads-template.csv" download>
+                    <Download size={13} aria-hidden="true" /> Download template
+                  </a>
+                </span>
+                <div>
+                  <span className="csv-col req">company</span>
+                  <span className="csv-col req">website or email</span>
+                  <span className="csv-col">first name</span>
+                  <span className="csv-col">last name</span>
+                  <span className="csv-col">city</span>
+                  <span className="csv-col">entity type (Ltd / LLP)</span>
+                </div>
+                <small className="muted">Orange = required. Rows missing them are skipped.</small>
+              </div>
+
+              <div className="csv-step">
+                <span className="csv-num">2</span>
+                <b>
+                  Campaign <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
+                </b>
+              </div>
+              <select name="campaign_id" defaultValue="">
+                <option value="">Automatic (recommended)</option>
+                {campaigns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <p className="csv-hint">
+                <Info size={13} aria-hidden="true" /> Emails are written and sent automatically after upload. No campaign needed.
+              </p>
+
+              <SubmitButton pending="Uploading...">
+                <UploadCloud size={16} aria-hidden="true" /> Upload leads
+              </SubmitButton>
             </form>
           </ModalButton>
           <ModalButton label="Add leads" title="Add leads">

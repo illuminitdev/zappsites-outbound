@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { db, must } from "@/lib/db";
+import { SESSION_COOKIE, sessionUserId } from "@/lib/session";
 import { createBooking } from "@/lib/booking";
 import { askedForReport, createInboundCheck, runInboundAudit, sendReport, tradeById } from "@/lib/inbound";
 import { runAudit } from "@/lib/audit";
@@ -60,6 +62,8 @@ export async function saveCampaign(f: FormData) {
   for (const k of ["tone", "booking_url", "signature"]) if (f.has(k)) row[k] = str(f, k);
   if (f.has("aeo_prompts")) row.aeo_prompts = str(f, "aeo_prompts").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   for (const k of ["send_window_start", "send_window_end"]) if (f.has(k)) row[k] = Number(str(f, k));
+  // Checkbox: only sent when ticked, so the form also sends a marker to say the field was shown.
+  if (f.has("auto_approve_shown")) row.auto_approve = f.get("auto_approve") === "on";
 
   const id = str(f, "id");
   if (id) must(await db().from("campaigns").update(row).eq("id", id));
@@ -411,6 +415,15 @@ export async function bookCall(f: FormData) {
     redirect(`${back}?error=${encodeURIComponent((e as Error).message)}`);
   }
   redirect(`/book/done?b=${id}`);
+}
+
+/** Admin: cancel a booking. Frees the slot on the booking page. */
+export async function cancelBooking(f: FormData) {
+  const user = await sessionUserId((await cookies()).get(SESSION_COOKIE)?.value);
+  if (!user) redirect("/login");
+  must(await db().from("bookings").update({ status: "cancelled" }).eq("id", str(f, "id")));
+  revalidatePath("/bookings");
+  back("/bookings", "Booking cancelled. That time is free again.");
 }
 
 export async function confirmUnsubscribe(f: FormData) {

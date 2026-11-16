@@ -1,0 +1,54 @@
+# Runs the outbound pipeline on a schedule by calling the deployed app's cron endpoints.
+# Works on any host (including Vercel Hobby, which only allows daily crons).
+#
+# Setup (GitHub repo -> Settings -> Secrets and variables -> Actions -> New repository secret):
+#   APP_URL      e.g. https://outbound.zappsites.com   (no trailing slash)
+#   CRON_SECRET  the same value as CRON_SECRET in the app's environment
+name: Outbound pipeline
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every 10 minutes: find emails, audit, write, send, read replies
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC: weekly report
+  workflow_dispatch: {} # "Run workflow" button for a manual run
+
+concurrency:
+  group: outbound-pipeline
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check secrets are set
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::Add APP_URL and CRON_SECRET in Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+
+      - name: Run pipeline
+        if: github.event.schedule != '0 7 * * 1'
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          code=$(curl -sS -o out.json -w "%{http_code}" --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/tick")
+          echo "HTTP $code"; cat out.json; echo
+          [ "$code" = "200" ]
+
+      - name: Weekly report
+        if: github.event.schedule == '0 7 * * 1'
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          code=$(curl -sS -o out.json -w "%{http_code}" --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/weekly")
+          echo "HTTP $code"; cat out.json; echo
+          [ "$code" = "200" ]

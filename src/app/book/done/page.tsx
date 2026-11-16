@@ -3,6 +3,7 @@ import { Conversion, GoogleTag } from "@/components/GoogleTag";
 import { brand } from "@/lib/brand";
 import { db } from "@/lib/db";
 import s from "../book.module.css";
+import { BookHeader } from "../BookHeader";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: `Booked · ${brand.name}`, robots: { index: false, follow: false } };
@@ -17,15 +18,10 @@ export default async function Done({ searchParams }: { searchParams: Promise<{ b
     : null;
   return (
     <div className={s.page}>
+      <BookHeader />
       <div className={s.wrap}>
-        <div className={s.brand}>
-          <a href={brand.url}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={brand.logoUrl} alt={brand.name} />
-          </a>
-          <span>{brand.tagline}</span>
-        </div>
         <div className={`${s.card} ${s.done}`}>
+          <div className={s.tick} aria-hidden="true">✓</div>
           <h1>You&apos;re booked{data ? `, ${data.name.split(/\s+/)[0]}` : ""}</h1>
           {when && <p>{when} (UK time), 15 minutes.</p>}
           {data?.method === "phone" && data.phone && <p>I&apos;ll call you on {data.phone}.</p>}
