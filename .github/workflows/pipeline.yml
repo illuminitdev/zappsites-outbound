@@ -38,7 +38,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           code=$(curl -sS -o out.json -w "%{http_code}" --max-time 330 \
-            -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/tick")
+            -H "Authorization: Bearer $CRON_SECRET" "${APP_URL%/}/api/cron/tick")
           echo "HTTP $code"; cat out.json; echo
           [ "$code" = "200" ]
 
@@ -49,6 +49,6 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           code=$(curl -sS -o out.json -w "%{http_code}" --max-time 330 \
-            -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/weekly")
+            -H "Authorization: Bearer $CRON_SECRET" "${APP_URL%/}/api/cron/weekly")
           echo "HTTP $code"; cat out.json; echo
           [ "$code" = "200" ]
