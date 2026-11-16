@@ -300,7 +300,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
               {status === "all" && !q ? "Use Add leads or Upload CSV above to import some." : null}
             </Empty>
           ) : (
-            <table className="data">
+            <table className="data leads-grid">
               <thead>
                 <tr>
                   {isReady && <th style={{ width: 36 }} />}
@@ -315,8 +315,8 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
               <tbody>
                 {leads.map((l) => (
                   <tr key={l.id}>
-                    {isReady && <td>{l.status === "ready" && <input type="checkbox" name="lead" value={l.id} disabled={!l.pecr_ok} />}</td>}
-                    <td>
+                    {isReady && <td className="lc-check">{l.status === "ready" && <input type="checkbox" name="lead" value={l.id} disabled={!l.pecr_ok} />}</td>}
+                    <td className="lc-co">
                       <div className="lead-co">
                         <span className="lead-avatar" style={{ background: avatarColor(l.company) }}>
                           {l.company.charAt(0).toUpperCase()}
@@ -344,7 +344,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                         </div>
                       </div>
                     </td>
-                    <td>
+                    <td className="lc-contact">
                       <div className="lead-contact-name">{[l.first_name, l.last_name].filter(Boolean).join(" ") || <span className="muted">No name</span>}</div>
                       <div className="muted small lead-meta">
                         {l.email ? (
@@ -358,11 +358,11 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                         {l.email_status !== "unknown" && <Pill v={l.email_status} />}
                       </div>
                     </td>
-                    <td>
+                    <td className="lc-score">
                       <Score v={l.audit?.url && l.audit.reachable ? displayScore(l.audit) : l.audit_score} />
                     </td>
-                    <td>{l.pecr_ok ? <span className="pill good">ok</span> : <span className="pill warn">{l.entity_type.replace(/_/g, " ")}</span>}</td>
-                    <td>
+                    <td className="lc-pecr">{l.pecr_ok ? <span className="pill good">ok</span> : <span className="pill warn">{l.entity_type.replace(/_/g, " ")}</span>}</td>
+                    <td className="lc-status">
                       <Pill v={l.status} />
                       {l.last_error && (
                         <div className="row-error" title={l.last_error}>
@@ -370,7 +370,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                         </div>
                       )}
                     </td>
-                    <td>
+                    <td className="lc-open">
                       <Link href={`/leads/${l.id}`} className="lead-open" aria-label={`Open ${l.company}`}>
                         <ChevronRight size={16} aria-hidden="true" />
                       </Link>

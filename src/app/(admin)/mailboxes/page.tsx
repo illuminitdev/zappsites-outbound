@@ -1,27 +1,47 @@
 import { ArrowDownToLine, ArrowUpFromLine, Gauge, Inbox, Mail, Pause, Play, Send } from "lucide-react";
 import { toggleMailbox } from "@/app/actions";
 import { MailboxForm } from "@/components/MailboxForm";
+import { MailboxHistory } from "@/components/MailboxHistory";
 import { ModalButton } from "@/components/Modal";
 import { ProviderIcon, providerName } from "@/components/ProviderIcons";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, Flash } from "@/components/ui";
 import { db, must } from "@/lib/db";
+import { loadMailboxHistory } from "@/lib/mailboxHistory";
 import type { Mailbox } from "@/lib/types";
 
 export default async function Mailboxes({ searchParams }: { searchParams: Promise<{ msg?: string }> }) {
   const { msg } = await searchParams;
-  const boxes = must(await db().from("mailboxes").select("*").order("created_at")) as Mailbox[];
-  const head = { count: "exact" as const, head: true };
-  const perBox = await Promise.all(
-    boxes.map(async (b) => {
-      const [today, total, received] = await Promise.all([
-        db().rpc("mailbox_sent_today", { mb: b.id }),
-        db().from("messages").select("id", head).eq("mailbox_id", b.id).eq("direction", "out").eq("status", "sent"),
-        db().from("messages").select("id", head).eq("mailbox_id", b.id).eq("direction", "in"),
-      ]);
-      return { today: (today.data as number) ?? 0, total: total.count ?? 0, received: received.count ?? 0 };
-    }),
-  );
+  // List, stats (mailbox_stats() is from migration 0007) and history in one parallel round trip.
+  const [list, statsRpc, history] = await Promise.all([
+    db().from("mailboxes").select("*").order("created_at"),
+    db().rpc("mailbox_stats"),
+    loadMailboxHistory(),
+  ]);
+  const boxes = must(list) as Mailbox[];
+  type Stats = { today: number; total: number; received: number };
+  let perBox: Stats[];
+  if (!statsRpc.error && statsRpc.data) {
+    const byId = new Map((statsRpc.data as { mailbox_id: string; sent_today: number; sent_total: number; received: number }[]).map((r) => [r.mailbox_id, r]));
+    perBox = boxes.map((b) => {
+      const r = byId.get(b.id);
+      return { today: Number(r?.sent_today ?? 0), total: Number(r?.sent_total ?? 0), received: Number(r?.received ?? 0) };
+    });
+  } else {
+    // Fallback until migration 0007 is run: per-mailbox counts, in parallel.
+    const head = { count: "exact" as const, head: true };
+    perBox = await Promise.all(
+      boxes.map(async (b) => {
+        const [today, total, received] = await Promise.all([
+          db().rpc("mailbox_sent_today", { mb: b.id }),
+          db().from("messages").select("id", head).eq("mailbox_id", b.id).eq("direction", "out").eq("status", "sent"),
+          db().from("messages").select("id", head).eq("mailbox_id", b.id).eq("direction", "in"),
+        ]);
+        return { today: (today.data as number) ?? 0, total: total.count ?? 0, received: received.count ?? 0 };
+      }),
+    );
+  }
+  const emails = Object.fromEntries(boxes.map((b) => [b.id, b.email]));
 
   const active = boxes.filter((b) => b.active);
   const sentToday = boxes.reduce((a, b, i) => a + (b.active ? perBox[i].today : 0), 0);
@@ -44,6 +64,9 @@ export default async function Mailboxes({ searchParams }: { searchParams: Promis
           <p>The email accounts that send your sequences and receive replies.</p>
         </div>
         <div className="head-actions">
+          <ModalButton label="History" title="Sending history" icon="history" variant="secondary">
+            <MailboxHistory days={history} emails={emails} />
+          </ModalButton>
           <ModalButton label="Add mailbox" title="Add mailbox" size="md">
             <MailboxForm />
           </ModalButton>

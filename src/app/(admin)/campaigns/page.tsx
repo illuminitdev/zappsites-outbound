@@ -44,24 +44,39 @@ function CampaignForm({ c }: { c?: Campaign }) {
 
 export default async function Campaigns({ searchParams }: { searchParams: Promise<{ msg?: string }> }) {
   const { msg } = await searchParams;
-  const campaigns = must(await db().from("campaigns").select("*").order("created_at", { ascending: false })) as Campaign[];
-
-  // Per-campaign numbers, all counted on the server in parallel.
-  const head = { count: "exact" as const, head: true };
-  const leadsQ = () => db().from("leads").select("id", head);
-  const msgsQ = () => db().from("messages").select("id", head);
-  const stats = await Promise.all(
-    campaigns.map(async (c) => {
-      const [leads, ready, sent, replies, interested] = await Promise.all([
-        leadsQ().eq("campaign_id", c.id),
-        leadsQ().eq("campaign_id", c.id).eq("status", "ready"),
-        msgsQ().eq("campaign_id", c.id).eq("direction", "out").eq("status", "sent"),
-        msgsQ().eq("campaign_id", c.id).eq("direction", "in").neq("classification", "bounce").neq("classification", "out_of_office"),
-        msgsQ().eq("campaign_id", c.id).eq("direction", "in").eq("classification", "interested"),
-      ]);
-      return { leads: leads.count ?? 0, ready: ready.count ?? 0, sent: sent.count ?? 0, replies: replies.count ?? 0, interested: interested.count ?? 0 };
-    }),
-  );
+  // The list and the stats in one parallel round trip (campaign_stats() is from migration 0007).
+  const [list, statsRpc] = await Promise.all([
+    db().from("campaigns").select("*").order("created_at", { ascending: false }),
+    db().rpc("campaign_stats"),
+  ]);
+  const campaigns = must(list) as Campaign[];
+  type Stats = { leads: number; ready: number; sent: number; replies: number; interested: number };
+  let stats: Stats[];
+  if (!statsRpc.error && statsRpc.data) {
+    const byId = new Map((statsRpc.data as ({ campaign_id: string } & Stats)[]).map((r) => [r.campaign_id, r]));
+    const zero: Stats = { leads: 0, ready: 0, sent: 0, replies: 0, interested: 0 };
+    stats = campaigns.map((c) => {
+      const r = byId.get(c.id) ?? zero;
+      return { leads: Number(r.leads), ready: Number(r.ready), sent: Number(r.sent), replies: Number(r.replies), interested: Number(r.interested) };
+    });
+  } else {
+    // Fallback until migration 0007 is run: per-campaign counts, in parallel.
+    const head = { count: "exact" as const, head: true };
+    const leadsQ = () => db().from("leads").select("id", head);
+    const msgsQ = () => db().from("messages").select("id", head);
+    stats = await Promise.all(
+      campaigns.map(async (c) => {
+        const [leads, ready, sent, replies, interested] = await Promise.all([
+          leadsQ().eq("campaign_id", c.id),
+          leadsQ().eq("campaign_id", c.id).eq("status", "ready"),
+          msgsQ().eq("campaign_id", c.id).eq("direction", "out").eq("status", "sent"),
+          msgsQ().eq("campaign_id", c.id).eq("direction", "in").neq("classification", "bounce").neq("classification", "out_of_office"),
+          msgsQ().eq("campaign_id", c.id).eq("direction", "in").eq("classification", "interested"),
+        ]);
+        return { leads: leads.count ?? 0, ready: ready.count ?? 0, sent: sent.count ?? 0, replies: replies.count ?? 0, interested: interested.count ?? 0 };
+      }),
+    );
+  }
   const activeCount = campaigns.filter((c) => c.active).length;
 
   return (

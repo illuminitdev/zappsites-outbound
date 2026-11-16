@@ -1,10 +1,10 @@
 "use client";
 
 import { createContext, useRef, type ReactNode } from "react";
-import { FileSearch, Pencil, Plus, Upload, X } from "lucide-react";
+import { FileSearch, History, Pencil, Plus, Upload, X } from "lucide-react";
 
 // Icons are picked by name: a server page can't pass a component function to this client component.
-const ICONS = { plus: Plus, upload: Upload, pencil: Pencil, audit: FileSearch };
+const ICONS = { plus: Plus, upload: Upload, pencil: Pencil, audit: FileSearch, history: History };
 const VARIANTS = { primary: "btn-link", secondary: "btn-link btn-outline", small: "secondary sm" };
 
 /** Lets a SubmitButton inside the dialog close it once its server action has finished. */
