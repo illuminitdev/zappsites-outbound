@@ -12,6 +12,8 @@ import { runAudit } from "@/lib/audit";
 import { getCampaign } from "@/lib/pipeline";
 import { toDomain } from "@/lib/http";
 import { parseLeadsCsv } from "@/lib/leads/csv";
+import Papa from "papaparse";
+import { readSheet } from "read-excel-file/node";
 import { verifySmtp } from "@/lib/mail/send";
 import {
   approveLeads,
@@ -137,8 +139,22 @@ export async function toggleMailbox(f: FormData) {
 
 export async function importCsv(f: FormData) {
   const file = f.get("file") as File | null;
-  if (!file || !file.size) return back("/leads", "Choose a CSV file");
-  const { leads, skipped } = parseLeadsCsv(await file.text());
+  if (!file || !file.size) return back("/leads", "Choose an Excel or CSV file");
+  let text: string;
+  if (/\.xlsx$/i.test(file.name)) {
+    try {
+      // First sheet of the workbook, turned into CSV so both formats share the same column matching.
+      const rows = await readSheet(Buffer.from(await file.arrayBuffer()));
+      text = Papa.unparse(rows.map((r) => r.map((c) => (c instanceof Date ? c.toISOString().slice(0, 10) : (c ?? "")))));
+    } catch {
+      return back("/leads", "Couldn't read that Excel file. Check it opens in Excel, or save it as CSV and try again.");
+    }
+  } else if (/\.xls$/i.test(file.name)) {
+    return back("/leads", "That's an old Excel file (.xls). In Excel: File → Save As → Excel Workbook (.xlsx), then upload again.");
+  } else {
+    text = await file.text();
+  }
+  const { leads, skipped } = parseLeadsCsv(text);
   const r = await importLeads(str(f, "campaign_id") || null, leads);
   back("/leads", `Imported ${r.inserted}, ${r.duplicates} duplicates, ${skipped} rows skipped (need company + website or email)`);
 }

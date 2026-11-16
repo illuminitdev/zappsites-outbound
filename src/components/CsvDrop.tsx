@@ -16,7 +16,7 @@ export function CsvDrop({ name = "file" }: { name?: string }) {
       onDrop={() => setOver(false)}
     >
       {/* The real input covers the box, so a dropped file lands in it natively. */}
-      <input type="file" name={name} accept=".csv,text/csv" required onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      <input type="file" name={name} accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" required onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       {file ? (
         <>
           <span className="csv-drop-icon done">
@@ -34,8 +34,8 @@ export function CsvDrop({ name = "file" }: { name?: string }) {
             <UploadCloud size={22} aria-hidden="true" />
           </span>
           <span className="csv-drop-text">
-            <b>Drop your CSV here, or click to browse</b>
-            <small>In Excel: File → Save As → CSV</small>
+            <b>Drop your Excel or CSV file here, or click to browse</b>
+            <small>Excel (.xlsx) or CSV · first sheet is used</small>
           </span>
         </>
       )}

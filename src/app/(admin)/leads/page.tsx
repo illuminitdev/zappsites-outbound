@@ -206,7 +206,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
               </div>
             </form>
           </ModalButton>
-          <ModalButton label="Upload CSV" title="Upload leads from CSV" icon="upload" variant="secondary" size="md">
+          <ModalButton label="Upload Excel / CSV" title="Upload leads (Excel or CSV)" icon="upload" variant="secondary" size="md">
             <form action={importCsv} className="modal-form csv-form">
               <div className="csv-step">
                 <span className="csv-num">1</span>
@@ -217,9 +217,16 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
               <div className="csv-cols">
                 <span className="csv-cols-head">
                   Columns
-                  <a href="/leads-template.csv" download>
-                    <Download size={13} aria-hidden="true" /> Download template
-                  </a>
+                  <span className="csv-templates">
+                    <Download size={13} aria-hidden="true" /> Template:
+                    <a href="/leads-template.xlsx" download>
+                      Excel
+                    </a>
+                    ·
+                    <a href="/leads-template.csv" download>
+                      CSV
+                    </a>
+                  </span>
                 </span>
                 <div>
                   <span className="csv-col req">company</span>
