@@ -72,6 +72,8 @@ export async function importLeads(campaignId: string | null, inputs: LeadInput[]
       first_name: l.first_name,
       last_name: l.last_name,
       city: l.city,
+      ...(l.phone ? { phone: l.phone } : {}),
+      ...(l.address ? { address: l.address } : {}),
       entity_type: l.entity_type,
       pecr_ok: isCorporateSubscriber(l.entity_type),
       source: l.source,
@@ -107,6 +109,8 @@ export async function importFromPlaces(campaignId: string | null, query: string,
       first_name: null,
       last_name: null,
       city: cityFrom(p.address),
+      phone: p.phone,
+      address: p.address,
       entity_type: "unknown",
       source: "places",
       source_ref: p.id,
@@ -209,7 +213,7 @@ export async function auditLeads(limit = 3) {
         continue;
       }
       // Site checks and AEO/GEO mentions run in parallel; a lead with no website still gets the mentions audit.
-      const audit = await runAudit(lead.website, aeoCtx);
+      const audit = await runAudit(lead.website, aeoCtx, { city: lead.city, phone: lead.phone ?? null, company: lead.company, domain: lead.domain });
       await setLead(lead.id, {
         status: "audited",
         audit,

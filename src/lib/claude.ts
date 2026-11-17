@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { displayScore } from "./audit/analyze";
 import { env } from "./env";
+import { bestSubject, pickHooks, weakSubject, type Hook } from "./sequence/hooks";
 import { brand } from "./brand";
 import { bannedFound, humanise, humaniseSubject } from "./sequence/humanise";
 import type { Audit, Campaign, Lead, ReplyClass } from "./types";
@@ -66,7 +67,8 @@ export const BOOKING_TOKEN = "[BOOKING_LINK]";
 function auditSummary(a: Audit | null): string {
   if (!a) return "No audit available.";
   const perf = a.performance.mobileScore !== null ? `Mobile speed score ${a.performance.mobileScore}/100.` : "";
-  const fails = a.checks.filter((c) => !c.pass).map((c) => `- [${c.impact}] ${c.label}: ${c.detail}`);
+  const fails = a.checks.filter((c) => !c.pass && !c.unverified).map((c) => `- [${c.impact}] ${c.label}: ${c.detail}`);
+  const unknown = a.checks.filter((c) => c.unverified).map((c) => c.label);
   const passes = a.checks.filter((c) => c.pass).map((c) => c.label);
   const names = { chatgpt: "ChatGPT", claude: "Claude", perplexity: "Perplexity", gemini: "Gemini" } as const;
   const aeo = a.aeo
@@ -84,6 +86,8 @@ function auditSummary(a: Audit | null): string {
     a.url ? `Overall score ${displayScore(a)}/100. ${perf}` : "No website found.",
     fails.length ? `Problems found:\n${fails.join("\n")}` : "No problems found.",
     `Passed: ${passes.join(", ") || "none"}.`,
+    unknown.length ? `Could NOT be checked (never claim these are problems): ${unknown.join(", ")}.` : "",
+    a.platform ? `Built with: ${a.platform}.` : "",
     ...aeo,
   ].join("\n");
 }
@@ -104,6 +108,8 @@ const WRITER_SYSTEM = `You write cold emails for ${"${BRAND}"}, a small UK compa
 - One specific observation about THEIR business, why it matters to them in plain terms, and one easy ask (a 15 minute call, or "want me to send the fixes?").
 - If an AI ANSWER ENGINE TEST is present and they were not mentioned, that is usually the best opener: say which assistant you asked, roughly what you asked, and optionally one business it named instead, exactly as listed. Only name engines and businesses that appear in the test data. Say "when I asked", never "every time"; answers vary.
 - Use the literal token ${AUDIT_TOKEN} where their audit page link goes (first email only, on its own line), and ${BOOKING_TOKEN} only if you mention booking a call. Each token at most once.
+- Each email is given a HOOK: the one specific thing it leads with. Use that hook's fact as the opener, in your own words, and don't reuse an earlier email's hook. Follow-ups are new information, never "just checking in".
+- SUBJECT LINES: the subject is the part they read before deciding to open, so it has to be about THEM. Rules: 2 to 6 words, lowercase like a note to a colleague, and it must contain a specific detail from the hook (a number, their town, a service, an AI assistant's name, a competitor, a page, the thing that's broken). Never a subject that could be sent to any business: no "your website", "website review", "quick question", "proposal", "partnership", "helping you grow", "free audit". No fake "re:". No question marks unless it's a real question. Give three different subject candidates for each email.
 - Greeting: "Hi {first name}," if known, otherwise just "Hi,". Never "Hi there" or "Dear".
 - No sign-off or signature; one is added automatically.
 - British English spelling.
@@ -112,7 +118,7 @@ ${HUMAN_STYLE}
 
 EXAMPLES OF THE VOICE (different businesses; never copy their facts):
 
-Subject: asked chatgpt about you
+Subject: chatgpt recommended towergate instead
 Hi Dan,
 
 I asked ChatGPT for a good commercial insurance broker for builders in Bristol last night. It named Towergate and a couple of others, but not you, even though you clearly specialise in it.
@@ -123,7 +129,7 @@ ${AUDIT_TOKEN}
 Worth a 15 minute call to go through it?
 
 ---
-Subject: your contact page on mobile
+Subject: tried to ring you from your site
 Hi,
 
 Tried to call you from your site on my phone and the number isn't tappable, so I had to copy it out. Small thing, but most people won't bother.
@@ -134,7 +140,7 @@ ${AUDIT_TOKEN}
 Want me to send over the fixes?
 
 ---
-(follow-up)
+(follow-up, subject: 6 seconds on a phone)
 Hi Dan, one more thing from that check. Your homepage takes about 6 seconds to show anything on a phone. Happy to talk it through if useful.`;
 
 function writerSystem() {
@@ -144,6 +150,7 @@ function writerSystem() {
 export interface WrittenEmail {
   subject: string;
   body: string;
+  subject_candidates?: string[];
 }
 
 export interface WrittenSequence {
@@ -152,13 +159,14 @@ export interface WrittenSequence {
   pageNote: string;
 }
 
-function cleanSequence(out: { emails: WrittenEmail[]; page_note?: string }, lead: Lead): WrittenSequence {
+function cleanSequence(out: { emails: WrittenEmail[]; page_note?: string }, lead: Lead, hooks: Hook[]): WrittenSequence {
   const keep = [lead.company, lead.city ?? "", "ChatGPT", "Claude", "Perplexity", "Gemini", "Google", "AI"];
   return {
     emails: out.emails.map((e, i) => {
       let body = humanise(e.body);
       if (i === 0 && !body.includes(AUDIT_TOKEN)) body = `${body}\n\n${AUDIT_TOKEN}`;
-      return { subject: humaniseSubject(e.subject, keep), body };
+      const candidates = [e.subject, ...(e.subject_candidates ?? []), ...(hooks[i]?.subjects ?? [])].map((c) => humaniseSubject(c, keep));
+      return { subject: bestSubject(candidates, lead, hooks), body };
     }),
     pageNote: humanise(out.page_note ?? ""),
   };
@@ -166,7 +174,14 @@ function cleanSequence(out: { emails: WrittenEmail[]; page_note?: string }, lead
 
 /** Write every step of the sequence for one lead in one call so the emails don't repeat each other. */
 export async function writeSequence(campaign: Campaign, lead: Lead): Promise<WrittenSequence> {
-  const steps = campaign.steps.map((s, i) => `Email ${i + 1} (day ${s.day}): ${s.instructions}`).join("\n");
+  const hooks = pickHooks(lead, lead.audit);
+  const hookFor = (i: number) => hooks[i % Math.max(hooks.length, 1)];
+  const steps = campaign.steps
+    .map((s, i) => {
+      const h = hookFor(i);
+      return `Email ${i + 1} (day ${s.day}): ${s.instructions}${h ? `\n  HOOK: ${h.fact}${h.why ? ` Why it matters: ${h.why}` : ""}\n  Subject ideas (use one, or something as specific): ${h.subjects.map((x) => `"${x}"`).join(", ")}` : ""}`;
+    })
+    .join("\n");
   const prompt = `OFFER: ${campaign.offer}
 WHO IT IS FOR: ${campaign.icp}
 PROOF (the only credibility claims you may use; may be empty): ${campaign.proof || "(none)"}
@@ -177,6 +192,8 @@ Company: ${lead.company}
 First name: ${lead.first_name ?? "(unknown)"}
 Website: ${lead.website ?? "(none)"}
 City: ${lead.city ?? "(unknown)"}
+Built with: ${lead.audit?.platform ?? "(unknown)"}
+Services on their site: ${lead.audit?.services?.join(", ") || "(unknown)"}
 
 THEIR AUDIT
 ${auditSummary(lead.audit)}
@@ -197,10 +214,11 @@ Also write page_note: 2-3 sentences from ${brand.person} that sit at the top of 
         items: {
           type: "object",
           properties: {
-            subject: { type: "string", description: "2-5 words, lowercase, like a note to a colleague. No clickbait, no 'quick question'." },
+            subject: { type: "string", description: "Best subject: 2-6 words, lowercase, contains a specific detail from the hook. Never generic." },
+            subject_candidates: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 3, description: "Two or three different subjects of the same standard." },
             body: { type: "string" },
           },
-          required: ["subject", "body"],
+          required: ["subject", "subject_candidates", "body"],
         },
       },
       page_note: { type: "string" },
@@ -212,18 +230,23 @@ Also write page_note: 2-3 sentences from ${brand.person} that sit at the top of 
   if (!Array.isArray(out.emails) || out.emails.length !== campaign.steps.length) {
     throw new Error("Claude returned the wrong number of emails");
   }
-  // One rewrite pass if it slipped into stock phrases.
+  // One rewrite pass if it slipped into stock phrases or a subject anyone could have been sent.
   const slips = bannedFound([...out.emails.map((e) => `${e.subject}\n${e.body}`), out.page_note].join("\n"));
-  if (slips.length) {
+  const weak = out.emails.filter((e) => [e.subject, ...(e.subject_candidates ?? [])].every((c) => weakSubject(c, lead, hooks))).map((e) => e.subject);
+  if (slips.length || weak.length) {
+    const notes = [
+      slips.length ? `used banned phrases: ${slips.map((x) => `"${x}"`).join(", ")}` : "",
+      weak.length ? `had subjects that could be sent to any business: ${weak.map((x) => `"${x}"`).join(", ")}. Every subject must name something specific from that email's HOOK` : "",
+    ].filter(Boolean);
     const retry = await structured<{ emails: WrittenEmail[]; page_note: string }>({
       system: writerSystem(),
-      prompt: `${prompt}\n\nYour previous draft used banned phrases: ${slips.map((x) => `"${x}"`).join(", ")}. Rewrite everything without them, keeping the same facts.\n\nPREVIOUS DRAFT:\n${JSON.stringify(out)}`,
+      prompt: `${prompt}\n\nYour previous draft ${notes.join("; and ")}. Rewrite, keeping the same facts.\n\nPREVIOUS DRAFT:\n${JSON.stringify(out)}`,
       toolName: "sequence",
       schema,
     });
     if (Array.isArray(retry.emails) && retry.emails.length === campaign.steps.length) out = retry;
   }
-  return cleanSequence(out, lead);
+  return cleanSequence(out, lead, hooks);
 }
 
 export interface ReplyAnalysis {

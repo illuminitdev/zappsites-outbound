@@ -308,7 +308,11 @@ export async function createManualAudit(f: FormData) {
     must(await db().from("leads").update({ source: "manual" }).eq("id", lead.id));
     const trade = tradeById(str(f, "trade"));
     try {
-      const audit = await runAudit(lead.website!, { company: lead.company, domain: lead.domain, city: lead.city, category: trade?.category ?? "" });
+      const audit = await runAudit(
+        lead.website!,
+        { company: lead.company, domain: lead.domain, city: lead.city, category: trade?.category ?? "" },
+        { city: lead.city, phone: lead.phone ?? null, company: lead.company, domain: lead.domain },
+      );
       must(
         await db()
           .from("leads")
@@ -339,7 +343,7 @@ export async function auditLeadNow(f: FormData) {
       city: lead.city,
       category: campaign?.aeo_category?.trim() ?? "",
       prompts: campaign?.aeo_prompts,
-    });
+    }, { city: lead.city, phone: lead.phone ?? null, company: lead.company, domain: lead.domain });
     const patch: Record<string, unknown> = {
       audit,
       audit_score: audit.score,

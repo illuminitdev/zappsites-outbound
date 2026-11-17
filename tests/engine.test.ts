@@ -11,7 +11,7 @@ import { entityTypeFromCompanyType, normaliseCompanyName } from "@/lib/leads/com
 const goodHtml = `<!doctype html><html><head><title>Acme Electrical | Leeds Electricians</title>
 <meta name="description" content="NICEIC approved electricians in Leeds for rewires, EV chargers and fault finding since 2009.">
 <meta name="viewport" content="width=device-width">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"Electrician","name":"Acme"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Electrician","name":"Acme","address":{"@type":"PostalAddress","addressLocality":"Leeds"},"telephone":"0113 496 0000","areaServed":"Leeds"}</script>
 </head><body><h1>Electricians in Leeds</h1><a href="tel:01131234567">Call</a> Get a quote
 <img src="a.jpg" alt="van"><img src="b.jpg" alt="team"><img src="c.jpg" alt="job">
 <footer>© 2026 Acme</footer></body></html>`;

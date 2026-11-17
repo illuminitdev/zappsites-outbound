@@ -255,6 +255,7 @@ table.data tr:last-child td { border-bottom: 0; }
 .check { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: 12px; font-weight: 700; }
 .check.pass { background: #eefaf4; color: var(--good); }
 .check.fail { background: #fdf0ef; color: var(--bad); }
+.check.unverified { background: #f3f2ef; color: #7a7e87; font-size: 12px; }
 .impact { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
 .impact.high { background: #fdf0ef; color: var(--bad); }
 .impact.medium { background: #fff8ea; color: var(--warn); }
@@ -772,6 +773,7 @@ a.camp-stat:hover { text-decoration: none; background: var(--accent-soft); }
 .ld-check { display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: start; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); }
 .ld-check.fail { background: #fffafa; border-color: #f6d7d4; border-left: 3px solid var(--bad); }
 .ld-check.pass { background: var(--card); }
+.ld-check.unverified { background: var(--card); opacity: 0.85; }
 .ld-check-text { display: flex; flex-direction: column; min-width: 0; }
 .ld-check-text b { font-size: 14px; }
 .ld-check-text span { font-size: 13px; color: var(--muted); }

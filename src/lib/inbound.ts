@@ -58,6 +58,7 @@ export async function createInboundCheck(i: CheckInput): Promise<Lead> {
       email_status: "valid",
       email_source: "inbound",
       city: i.town || null,
+      phone: i.phone || null,
       source: "inbound",
       source_ref: i.gclid,
       // They asked for this report, so replying to them about it is consented contact.
@@ -78,7 +79,7 @@ export async function runInboundAudit(lead: Lead, tradeId: string) {
   const trade = tradeById(tradeId);
   try {
     // Questions are written from the services on their site; the trade is only a fallback.
-    const audit = await runAudit(lead.website!, { company: lead.company, domain: lead.domain, city: lead.city, category: trade?.category ?? "" });
+    const audit = await runAudit(lead.website!, { company: lead.company, domain: lead.domain, city: lead.city, category: trade?.category ?? "" }, { city: lead.city, phone: lead.phone ?? null, company: lead.company, domain: lead.domain });
     must(
       await db()
         .from("leads")

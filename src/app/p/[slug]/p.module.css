@@ -148,3 +148,42 @@
   .sectionHead h2 { font-size: 22px; }
 }
 .capNote { margin: 8px 0 0; font-size: 12.5px; color: rgba(255, 255, 255, 0.55); }
+
+/* ---- "Download PDF" button (uses the browser's Save as PDF with the print styles below) ---- */
+.heroTop { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.heroTop .eyebrow { margin: 0; }
+.pdf { background: transparent; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; padding: 5px 13px; font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.85); cursor: pointer; margin: 0; }
+.pdf:hover { border-color: var(--accent); color: #fff; }
+
+/* ---- checks we couldn't verify (JS-built or bot-protected sites) ---- */
+.notice { background: rgba(255, 191, 92, 0.12); border: 1px solid rgba(255, 191, 92, 0.35); border-radius: 10px; padding: 10px 14px; font-size: 14px; color: #ffd9a0; margin: 16px 0 0; max-width: 520px; }
+
+/* ---- "What we'd fix, and what it costs" ---- */
+.fixHow { margin-top: 8px !important; font-size: 14.5px; color: var(--muted) !important; }
+.fixHow b { color: var(--ink); font-weight: 650; }
+.plan { display: grid; gap: 12px; }
+.planStep { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+.planHead { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.planHead h3 { margin: 0; font-size: 17px; }
+.price { font-weight: 750; font-size: 17px; white-space: nowrap; }
+.price small { font-weight: 500; color: var(--muted); font-size: 12.5px; }
+.planStep p { margin: 6px 0 0; color: var(--text); font-size: 15px; }
+.planStep ul { margin: 8px 0 0; padding-left: 18px; font-size: 14.5px; color: var(--text); }
+.term { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+.total { background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 14px; padding: 14px 18px; font-size: 15px; color: var(--text); }
+
+@media print {
+  .page { background: #fff; }
+  .top, .pdf, .btn, .topBtn, .foot a { display: none !important; }
+  .hero { background: #fff; color: var(--ink); }
+  .heroInner { padding: 16px 0; }
+  .lede, .verdictSub, .capNote, .domain { color: var(--text); }
+  .scoreCard { background: #fff; border-color: var(--line); }
+  .notice { color: #5a4a1e; background: #fff8e8; border-color: #f0dfb4; }
+  .wrap { margin-top: 0; }
+  .cta { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+  .cta p, .ctaSide small, .ctaSide small a { color: var(--text); }
+  .fix, .stat, .group, .planStep, .tableWrap, .letter { break-inside: avoid; box-shadow: none; }
+  .sectionHead { break-after: avoid; }
+  .ring text { fill: var(--ink); }
+}

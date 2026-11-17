@@ -10,12 +10,14 @@ export interface LeadInput {
   first_name: string | null;
   last_name: string | null;
   city: string | null;
+  phone?: string | null;
+  address?: string | null;
   entity_type: EntityType;
   source: string;
   source_ref: string | null;
 }
 
-const ALIASES: Record<keyof Omit<LeadInput, "domain" | "source" | "source_ref">, string[]> = {
+const ALIASES: Record<keyof Omit<LeadInput, "domain" | "source" | "source_ref" | "phone" | "address">, string[]> = {
   company: ["company", "company name", "business", "business name", "name", "organisation", "organization"],
   website: ["website", "url", "site", "web", "domain"],
   email: ["email", "email address", "e-mail"],

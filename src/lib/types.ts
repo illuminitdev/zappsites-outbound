@@ -88,6 +88,8 @@ export interface Lead {
   email_status: "unknown" | "valid" | "risky" | "invalid";
   email_source: string | null;
   city: string | null;
+  phone?: string | null;
+  address?: string | null;
   source: string;
   source_ref: string | null;
   entity_type: EntityType;
@@ -108,7 +110,10 @@ export interface AuditCheck {
   pass: boolean;
   detail: string;
   impact: "high" | "medium" | "low";
+  unverified?: boolean; // we couldn't check this reliably: shown as "couldn't check", left out of the score
 }
+
+export type AuditCategory = "ai" | "google" | "local" | "speed" | "trust" | "content" | "technical";
 
 export interface Audit {
   url: string;
@@ -119,11 +124,15 @@ export interface Audit {
     lcpSeconds: number | null;
     cls: number | null;
     screenshot?: string | null; // data:image/jpeg;base64 of their homepage on a phone (from Lighthouse)
+    fieldLcpSeconds?: number | null; // real visitors on phones (Chrome UX Report), when Google has enough data
   };
   checks: AuditCheck[];
   score: number; // 0-100 overall
   topIssues: AuditCheck[]; // worst first, max 3
   aeo?: AeoAudit | null; // AEO/GEO mentions audit, when engines + a category are configured
+  platform?: string | null; // Wix, WordPress, Squarespace...
+  content?: "html" | "rendered" | "js_shell" | "blocked"; // how much of the page we could actually read
+  services?: string[]; // services read from their site
 }
 
 export interface AeoResult {

@@ -1,5 +1,5 @@
-const UA =
-  "Mozilla/5.0 (compatible; SiteAuditBot/1.0; +https://example.invalid/bot) AppleWebKit/537.36 (KHTML, like Gecko)";
+// Identifies us honestly; a real browser string would get past more bot walls but misrepresents who's visiting.
+const UA = `Mozilla/5.0 (compatible; ${process.env.BRAND_NAME || "ZappSites"}Audit/1.1; +${process.env.BRAND_URL || "https://www.zappsites.com"}) AppleWebKit/537.36 (KHTML, like Gecko)`;
 
 export interface FetchResult {
   ok: boolean;

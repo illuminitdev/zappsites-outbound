@@ -1,4 +1,5 @@
-import type { Audit, AuditCheck } from "../types";
+import type { Audit, AuditCategory, AuditCheck } from "../types";
+import { schemaCheck } from "./local";
 
 /** Pure HTML/robots analysis. No network: easy to test. */
 export interface PageFacts {
@@ -114,19 +115,7 @@ export function analyzePage(f: PageFacts): AuditCheck[] {
     detail: viewport ? "Yes." : "No. On a phone it probably shows as a shrunk-down desktop page that people have to pinch and zoom.",
   });
 
-  const ldBlocks = [...html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
-  const types = new Set<string>();
-  for (const b of ldBlocks) for (const m of b.matchAll(/"@type"\s*:\s*"([^"]+)"/g)) types.add(m[1]);
-  const bizSchema = [...types].some((t) => /LocalBusiness|Organization|ProfessionalService|InsuranceAgency|Electrician|Plumber|HomeAndConstructionBusiness|AccountingService|LegalService|Store/i.test(t));
-  add({
-    id: "schema",
-    label: "Business structured data",
-    pass: bizSchema,
-    impact: "high",
-    detail: bizSchema
-      ? "Yes."
-      : "Not clearly. The site is missing the behind-the-scenes business details Google and AI tools read, so they have to guess.",
-  });
+  add(schemaCheck(html));
 
   const blocked = blockedAiBots(f.robotsTxt);
   add({
@@ -219,7 +208,7 @@ export const HIGH_ISSUE_CEILING = 69;
 
 /** True when a high-impact check fails or Google rates mobile speed below 50. */
 export function hasHighImpactIssue(checks: AuditCheck[], mobileScore: number | null): boolean {
-  return checks.some((c) => !c.pass && c.impact === "high") || (mobileScore !== null && mobileScore < 50);
+  return checks.some((c) => !c.pass && !c.unverified && c.impact === "high") || (mobileScore !== null && mobileScore < 50);
 }
 
 /**
@@ -231,6 +220,7 @@ export function scoreAudit(checks: AuditCheck[], mobileScore: number | null): nu
   let total = 0;
   let got = 0;
   for (const c of checks) {
+    if (c.unverified) continue;
     total += WEIGHT[c.impact];
     if (c.pass) got += WEIGHT[c.impact];
   }
@@ -249,7 +239,38 @@ export function displayScore(a: Pick<Audit, "score" | "checks" | "performance">)
 
 export function topIssues(checks: AuditCheck[], n = 3): AuditCheck[] {
   return checks
-    .filter((c) => !c.pass)
+    .filter((c) => !c.pass && !c.unverified)
     .sort((a, b) => WEIGHT[b.impact] - WEIGHT[a.impact])
     .slice(0, n);
+}
+
+/** Which section of the report each check belongs to. */
+export const CATEGORY: Record<string, AuditCategory> = {
+  ai_mentions: "ai", ai_crawlers: "ai", llms_txt: "ai", faq: "ai", blog: "ai",
+  indexable: "google", title: "google", meta_description: "google", h1: "google", headings: "google", sitemap: "google", canonical: "google", redirects: "google", content_depth: "google",
+  local_headline: "local", service_pages: "local", service_areas: "local", nap: "local", schema: "local", maps_link: "local", opening_hours: "local",
+  mobile_speed: "speed", mobile: "speed", response_time: "speed", image_formats: "speed",
+  reviews: "trust", accreditations: "trust", freshness: "trust", og_tags: "trust", favicon: "trust", social_links: "trust", privacy_policy: "trust", pricing_signal: "trust",
+  cta: "content", click_to_call: "content", contact_form: "content", online_booking: "content", whatsapp: "content",
+  reachable: "technical", https: "technical", mixed_content: "technical", hsts: "technical", broken_links: "technical", not_found: "technical", alt_text: "technical", lang: "technical", email_auth: "technical",
+};
+
+export const CATEGORY_LABEL: Record<AuditCategory, string> = {
+  ai: "AI assistants",
+  google: "Showing up on Google",
+  local: "Local search",
+  speed: "Speed on a phone",
+  trust: "Trust and first impressions",
+  content: "Turning visitors into enquiries",
+  technical: "Behind the scenes",
+};
+
+const CATEGORY_ORDER: AuditCategory[] = ["ai", "google", "local", "speed", "content", "trust", "technical"];
+
+export function groupChecks(checks: AuditCheck[]): { category: AuditCategory; label: string; checks: AuditCheck[]; passed: number; total: number }[] {
+  return CATEGORY_ORDER.map((category) => {
+    const cs = checks.filter((c) => (CATEGORY[c.id] ?? "technical") === category);
+    const counted = cs.filter((c) => !c.unverified);
+    return { category, label: CATEGORY_LABEL[category], checks: cs, passed: counted.filter((c) => c.pass).length, total: counted.length };
+  }).filter((g) => g.checks.length);
 }

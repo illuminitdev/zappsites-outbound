@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { GoogleTag } from "@/components/GoogleTag";
-import { displayScore, HIGH_ISSUE_CEILING } from "@/lib/audit/analyze";
+import { displayScore, groupChecks, HIGH_ISSUE_CEILING } from "@/lib/audit/analyze";
 import { brand } from "@/lib/brand";
 import { db } from "@/lib/db";
+import { fixPlan } from "@/lib/offers";
 import type { AeoAudit, Audit, AuditCheck, Lead } from "@/lib/types";
+import { PrintButton } from "./PrintButton";
 import s from "./p.module.css";
 
 export const dynamic = "force-dynamic";
@@ -15,26 +17,6 @@ const ENGINE: Record<string, string> = { chatgpt: "ChatGPT", claude: "Claude", p
 const and = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
 const IMPACT_ORDER = { high: 0, medium: 1, low: 2 } as const;
 const IMPACT_LABEL = { high: "High impact", medium: "Medium impact", low: "Quick win" } as const;
-/** Which part of the report each check belongs to. */
-const GROUP: Record<string, "Speed and phones" | "Google" | "AI assistants" | "Getting enquiries"> = {
-  mobile: "Speed and phones",
-  response_time: "Speed and phones",
-  https: "Google",
-  title: "Google",
-  meta_description: "Google",
-  h1: "Google",
-  sitemap: "Google",
-  alt_text: "Google",
-  schema: "AI assistants",
-  ai_crawlers: "AI assistants",
-  llms_txt: "AI assistants",
-  ai_mentions: "AI assistants",
-  mobile_speed: "Speed and phones",
-  click_to_call: "Getting enquiries",
-  cta: "Getting enquiries",
-  freshness: "Getting enquiries",
-};
-const GROUPS = ["Speed and phones", "Google", "AI assistants", "Getting enquiries"] as const;
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
@@ -165,35 +147,37 @@ function AeoSection({ aeo, company }: { aeo: AeoAudit; company: string }) {
 }
 
 function Checklist({ checks }: { checks: AuditCheck[] }) {
+  const groups = groupChecks(checks);
+  const counted = checks.filter((c) => !c.unverified);
   return (
     <section className={s.section}>
       <div className={s.sectionHead}>
         <span className={s.kicker}>Everything we checked</span>
         <h2>Full checklist</h2>
         <p>
-          {checks.filter((c) => c.pass).length} of {checks.length} checks passed.
+          {counted.filter((c) => c.pass).length} of {counted.length} checks passed, across {groups.length} areas.
         </p>
       </div>
       <div className={s.groups}>
-        {GROUPS.map((g) => {
-          const list = checks.filter((c) => (GROUP[c.id] ?? "Google") === g).sort((a, b) => Number(a.pass) - Number(b.pass));
-          if (!list.length) return null;
-          const ok = list.filter((c) => c.pass).length;
+        {groups.map((g) => {
+          // Failed first, then passed, then the ones we couldn't check.
+          const rank = (c: AuditCheck) => (c.unverified ? 2 : c.pass ? 1 : 0);
+          const list = [...g.checks].sort((a, b) => rank(a) - rank(b));
           return (
-            <div key={g} className={s.group}>
+            <div key={g.category} className={s.group}>
               <div className={s.groupHead}>
-                <h3>{g}</h3>
-                <span className={`${s.tally} ${ok === list.length ? s.good : ok === 0 ? s.bad : s.warn}`}>
-                  {ok}/{list.length}
+                <h3>{g.label}</h3>
+                <span className={`${s.tally} ${g.passed === g.total ? s.good : g.passed / Math.max(g.total, 1) < 0.5 ? s.bad : s.warn}`}>
+                  {g.passed}/{g.total}
                 </span>
               </div>
               <ul>
                 {list.map((c) => (
                   <li key={c.id}>
-                    <Mark pass={c.pass} />
+                    <Mark pass={c.unverified ? null : c.pass} />
                     <div>
                       <b>{c.label}</b>
-                      <small>{c.pass ? plain(c.detail) || "Looks good." : plain(c.detail)}</small>
+                      <small>{c.unverified ? `Couldn't check. ${plain(c.detail)}` : c.pass ? plain(c.detail) || "Looks good." : plain(c.detail)}</small>
                     </div>
                   </li>
                 ))}
@@ -226,6 +210,116 @@ function Cta({ book, offer }: { book: string; offer: string | null }) {
   );
 }
 
+// Plain-English headline for a failed check (the checklist keeps the short labels).
+const HEADLINE: Record<string, string> = {
+  ai_mentions: "AI assistants mostly recommend other firms",
+  mobile_speed: "Your site is slow on a phone",
+  service_pages: "Most of your services don't have their own page",
+  schema: "Google and AI can't tell where you work",
+  local_headline: "Your homepage doesn't say where you are",
+  https: "Browsers warn people your site isn't secure",
+  mobile: "The site isn't built for phones",
+  title: "Your Google listing has no proper title",
+  meta_description: "Google writes your search snippet for you",
+  h1: "The page doesn't say what you do up front",
+  cta: "There's no obvious next step for visitors",
+  click_to_call: "People on phones can't tap to call you",
+  ai_crawlers: "Your site blocks AI assistants",
+  nap: "Your contact details don't line up",
+  service_areas: "Nothing says which areas you cover",
+  freshness: "The site looks like it hasn't been touched in a while",
+  response_time: "The server is slow to respond",
+  reachable: "Your website isn't loading",
+  indexable: "Google has been told not to list your site",
+  canonical: "Your site credits a different address",
+  redirects: "Your site lives at more than one address",
+  broken_links: "Some of your menu links are dead",
+  mixed_content: "Browsers block part of your page",
+  content_depth: "Your homepage says very little",
+  faq: "Nothing answers the questions customers ask",
+  reviews: "Your reviews aren't on the site",
+  accreditations: "Nothing shows you're accredited or insured",
+  contact_form: "There's no way to send an enquiry",
+  online_booking: "Nobody can book or get a quote online",
+  email_auth: "Your emails are likely to land in spam",
+  og_tags: "Shared links show a blank box",
+};
+
+const FIX: Record<string, string> = {
+  ai_mentions: "get you listed and described consistently on the sites AI tools read, and add pages that answer the questions customers ask.",
+  mobile_speed: "rebuild the page to load in under two seconds on a phone: smaller images, less script, proper hosting.",
+  service_pages: "a short page for each service, written for the town you work in, linked from your homepage.",
+  schema: "add the business details (address, phone, areas, hours) in the format Google and AI tools read.",
+  local_headline: "put your town in the page title and main heading, so it's clear who you serve.",
+  https: "switch on SSL so the padlock shows. Usually same day.",
+  mobile: "a mobile-first layout, so the site works properly on a phone.",
+  meta_description: "write the two lines people see under your name on Google.",
+  click_to_call: "make your number a tap-to-call button at the top of every page.",
+  cta: "one clear button at the top: call, book, or get a quote.",
+  ai_crawlers: "change one setting so AI assistants are allowed to read your site.",
+  nap: "make your name, address and phone match everywhere, starting with your site and Google listing.",
+  service_areas: "a page listing the towns you cover.",
+  freshness: "update the copyright year, recent work and reviews.",
+  indexable: "remove the noindex setting so Google can list the site. Usually a one-minute fix.",
+  canonical: "point the canonical tag at your own address.",
+  redirects: "send www, non-www and http to one address.",
+  broken_links: "fix or remove the dead links.",
+  mixed_content: "update the files still loading over plain http.",
+  content_depth: "write a proper homepage: what you do, where, for whom, and why you.",
+  faq: "an FAQ page answering the questions customers actually ask, marked up so AI tools can read it.",
+  reviews: "pull your Google reviews onto the homepage so they update themselves.",
+  accreditations: "show the badges and insurance you already have, near the top.",
+  contact_form: "a short enquiry form that emails you and sends an auto-reply.",
+  online_booking: "online booking or a quote request with confirmations and reminders.",
+  email_auth: "add SPF and DMARC records to your domain. Half an hour, one-off.",
+  og_tags: "set a title and picture for link previews.",
+};
+
+function FixPlanSection({ a }: { a: Audit | null }) {
+  if (process.env.SHOW_FIX_PLAN === "false") return null;
+  const plan = fixPlan(a);
+  if (!plan.steps.length) return null;
+  const gbp = (n: number) => `£${n}`;
+  return (
+    <section className={s.section}>
+      <div className={s.sectionHead}>
+        <span className={s.kicker}>Pricing</span>
+        <h2>What we&apos;d fix, and what it costs</h2>
+      </div>
+      <div className={s.plan}>
+        {plan.steps.map((st) => (
+          <div key={st.offer.id} className={s.planStep}>
+            <div className={s.planHead}>
+              <h3>{st.offer.name}</h3>
+              <span className={s.price}>
+                {gbp(st.offer.price)} <small>a month</small>
+              </span>
+            </div>
+            <p>{st.offer.blurb}</p>
+            {st.fixes.length > 0 && (
+              <ul>
+                {st.fixes.slice(0, 6).map((c) => (
+                  <li key={c.id}>{c.label}</li>
+                ))}
+                {st.fixes.length > 6 && <li>and {st.fixes.length - 6} more from the checklist</li>}
+              </ul>
+            )}
+            {plan.noWebsite && st.offer.id === "essential" && <ul><li>A website for customers and AI assistants to find</li></ul>}
+            <div className={s.term}>{st.offer.term}</div>
+          </div>
+        ))}
+        {plan.bundle && (
+          <div className={s.total}>
+            Together that&apos;s {gbp(plan.monthly)} a month. Or the <b>{plan.bundle.name}</b> at {gbp(plan.bundle.price)} a month, which adds online
+            booking and tracking of every call, form and booking ({plan.bundle.term}).
+          </div>
+        )}
+      </div>
+      <p className={s.note}>Prices from {brand.url.replace(/^https?:\/\//, "")}/pricing. We&apos;ll confirm everything on the call before you commit to anything.</p>
+    </section>
+  );
+}
+
 export default async function AuditPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const { data: lead } = await db().from("leads").select("*").eq("slug", slug).maybeSingle<Lead>();
@@ -240,8 +334,10 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
   const a: Audit | null = lead.audit;
   const hi = lead.first_name ? `Hi ${lead.first_name}. ` : "";
   const date = new Date(a?.fetchedAt ?? lead.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-  const fails = a?.checks.filter((c) => !c.pass) ?? [];
-  const passed = (a?.checks.length ?? 0) - fails.length;
+  // Checks we couldn't verify (JS-built or bot-protected sites) are shown as "couldn't check" and left out of the counts.
+  const fails = a?.checks.filter((c) => !c.pass && !c.unverified) ?? [];
+  const passed = a?.checks.filter((c) => c.pass && !c.unverified).length ?? 0;
+  const skipped = a?.checks.filter((c) => c.unverified).length ?? 0;
   const top = a?.topIssues?.length ? a.topIssues : [...fails].sort((x, y) => IMPACT_ORDER[x.impact] - IMPACT_ORDER[y.impact]).slice(0, 3);
   const book = `/api/public/go/${lead.slug}`;
   const ok = !!a?.url && a.reachable;
@@ -267,7 +363,10 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
       <div className={s.hero}>
         <div className={s.heroInner}>
           <div className={s.heroText}>
-            <p className={s.eyebrow}>Website report · {date}</p>
+            <div className={s.heroTop}>
+              <p className={s.eyebrow}>Website report · {date}</p>
+              <PrintButton className={s.pdf} />
+            </div>
             <h1>{lead.company}</h1>
             {lead.domain && (
               <a className={s.domain} href={a?.url || `https://${lead.domain}`} target="_blank" rel="noreferrer nofollow">
@@ -277,10 +376,19 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
             <p className={s.lede}>
               {!a?.url
                 ? `${hi}We couldn't find a website for ${lead.company}. When customers search for you, or ask ChatGPT for a recommendation, there's nothing for them to land on.`
-                : !a.reachable
+                : a.content === "blocked" && a.performance.mobileScore === null
+                  ? `${hi}${lead.domain} blocks automated checks like ours, so we couldn't read the site itself. That's not a fault, but some AI tools are blocked the same way.`
+                  : !a.reachable
                   ? `${hi}We tried to check ${lead.domain}, but the site didn't load. Anyone clicking through from Google or a business card sees an error page.`
                   : `${hi}We checked ${lead.domain} the way your customers find you: on a phone, on Google, and by asking AI assistants like ChatGPT. Here's what we found.`}
             </p>
+            {ok && skipped > 0 && (
+              <p className={s.notice}>
+                {a!.content === "blocked"
+                  ? `Your site blocks automated checks, so we skipped ${skipped} checks rather than guess. They're marked "couldn't check" below.`
+                  : `${a!.platform && a!.platform !== "JavaScript app" ? `Your site is built on ${a!.platform} and` : "Your site"} loads its content with JavaScript, so we skipped ${skipped} checks rather than guess. They're marked "couldn't check" below.`}
+              </p>
+            )}
           </div>
           {ok && (
             <div className={s.scoreCard}>
@@ -362,10 +470,15 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
                       <span className={s.fixNum}>{i + 1}</span>
                       <div>
                         <div className={s.fixHead}>
-                          <h3>{c.label}</h3>
+                          <h3>{HEADLINE[c.id] ?? c.label}</h3>
                           <span className={s.badge}>{IMPACT_LABEL[c.impact]}</span>
                         </div>
                         <p>{plain(c.detail)}</p>
+                        {FIX[c.id] && (
+                          <p className={s.fixHow}>
+                            <b>What we&apos;d do:</b> {FIX[c.id]}
+                          </p>
+                        )}
                       </div>
                     </li>
                   ))}
@@ -384,11 +497,21 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
 
         {a?.aeo && <AeoSection aeo={a.aeo} company={lead.company} />}
 
-        {ok && top.length > 0 && <Cta book={book} offer={campaign?.offer ?? null} />}
+        {ok && top.length > 0 && (
+          <>
+            <FixPlanSection a={a} />
+            <Cta book={book} offer={campaign?.offer ?? null} />
+          </>
+        )}
 
         {ok && <Checklist checks={a!.checks} />}
 
-        {!(ok && top.length > 0) && <Cta book={book} offer={campaign?.offer ?? null} />}
+        {!(ok && top.length > 0) && (
+          <>
+            <FixPlanSection a={a} />
+            <Cta book={book} offer={campaign?.offer ?? null} />
+          </>
+        )}
 
         <footer className={s.foot}>
           Automated check of publicly available pages on {date}. Speed data from Google PageSpeed Insights

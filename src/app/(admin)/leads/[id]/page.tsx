@@ -65,9 +65,15 @@ function ScoreRing({ v, label }: { v: number | null | undefined; label: string }
 
 function CheckRow({ c }: { c: AuditCheck }) {
   return (
-    <li className={`ld-check ${c.pass ? "pass" : "fail"}`}>
-      <span className={`check ${c.pass ? "pass" : "fail"}`}>
-        {c.pass ? <Check size={13} strokeWidth={3} aria-label="Pass" /> : <X size={13} strokeWidth={3} aria-label="Fail" />}
+    <li className={`ld-check ${c.unverified ? "unverified" : c.pass ? "pass" : "fail"}`}>
+      <span className={`check ${c.unverified ? "unverified" : c.pass ? "pass" : "fail"}`}>
+        {c.unverified ? (
+          <b aria-label="Couldn't check">?</b>
+        ) : c.pass ? (
+          <Check size={13} strokeWidth={3} aria-label="Pass" />
+        ) : (
+          <X size={13} strokeWidth={3} aria-label="Fail" />
+        )}
       </span>
       <div className="ld-check-text">
         <b>{c.label}</b>
@@ -120,8 +126,11 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const reportSent = events.some((e) => e.type === "report_sent");
 
   const checks = audit?.checks ?? [];
-  const failing = checks.filter((c) => !c.pass).sort((a, b) => IMPACT_ORDER[a.impact] - IMPACT_ORDER[b.impact]);
-  const passing = checks.filter((c) => c.pass);
+  // "Unverified" checks couldn't be read reliably: shown as "couldn't check" and left out of the counts.
+  const unverified = checks.filter((c) => c.unverified);
+  const verified = checks.filter((c) => !c.unverified);
+  const failing = verified.filter((c) => !c.pass).sort((a, b) => IMPACT_ORDER[a.impact] - IMPACT_ORDER[b.impact]);
+  const passing = verified.filter((c) => c.pass);
   const perf = audit?.performance;
   const timeline = groupEvents(events);
   const initial = (lead.company || "?").trim().charAt(0).toUpperCase();
@@ -449,7 +458,12 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                 <div className="ld-panel-title">
                   <h2>Website audit</h2>
                   <span>
-                    {passing.length} of {checks.length} checks passed
+                    {passing.length} of {verified.length} checks passed
+                    {audit?.platform ? ` · Built with ${audit.platform}` : ""}
+                    {audit?.content && audit.content !== "html"
+                      ? ` · Page read: ${{ rendered: "rendered in a browser", js_shell: "JavaScript shell, some checks skipped", blocked: "blocked by bot protection" }[audit.content]}`
+                      : ""}
+                    {audit?.services?.length ? ` · Services: ${audit.services.join(", ")}` : ""}
                   </span>
                 </div>
                 <div className="ld-tally">
@@ -458,7 +472,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                 </div>
               </div>
               <div className="ld-progress" aria-hidden="true">
-                <span style={{ width: `${(passing.length / checks.length) * 100}%` }} />
+                <span style={{ width: `${(passing.length / Math.max(1, verified.length)) * 100}%` }} />
               </div>
               {failing.length > 0 ? (
                 <>
@@ -482,6 +496,19 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                   </summary>
                   <ul className="ld-checks">
                     {passing.map((c) => (
+                      <CheckRow key={c.id} c={c} />
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {unverified.length > 0 && (
+                <details className="ld-more">
+                  <summary>
+                    <ChevronDown size={15} aria-hidden="true" />
+                    Show {unverified.length} {unverified.length === 1 ? "check" : "checks"} we couldn&apos;t verify
+                  </summary>
+                  <ul className="ld-checks">
+                    {unverified.map((c) => (
                       <CheckRow key={c.id} c={c} />
                     ))}
                   </ul>
