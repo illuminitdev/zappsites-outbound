@@ -8,7 +8,9 @@ name: Outbound pipeline
 
 on:
   schedule:
-    - cron: "*/10 * * * *" # every 10 minutes: find emails, audit, write, send, read replies
+    # The 10-minute pipeline tick is driven by cron-job.org, calling
+    # /api/cron/tick?background=1 (GitHub schedules ran hours late). Don't re-add a
+    # 10-minute schedule here: two overlapping ticks could send an email twice.
     - cron: "0 7 * * 1" # Mondays 07:00 UTC: weekly report
   workflow_dispatch: {} # "Run workflow" button for a manual run
 
