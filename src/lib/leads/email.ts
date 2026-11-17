@@ -47,11 +47,18 @@ export function pickBest(emails: string[], domain: string | null, firstName?: st
 
 export async function scrapeSiteEmails(website: string): Promise<string[]> {
   const domain = toDomain(website);
-  const base = website.replace(/\/$/, "");
-  const paths = ["", "/contact", "/contact-us", "/about", "/about-us"];
+  // Listings often carry a sub-page or tracking query (e.g. "/birmingham?utm_source=..."),
+  // so contact pages are built from the site root, not appended to the full URL.
+  let origin = website.replace(/\/$/, "");
+  try {
+    origin = new URL(/^https?:\/\//i.test(website) ? website : `https://${website}`).origin;
+  } catch {
+    /* keep the raw value */
+  }
+  const urls = [website, ...["", "/contact", "/contact-us", "/about", "/about-us"].map((p) => origin + p)];
   const all = new Set<string>();
-  for (const p of paths) {
-    const r = await fetchText(base + p, { timeoutMs: 10000, maxBytes: 1_500_000 });
+  for (const url of [...new Set(urls)]) {
+    const r = await fetchText(url, { timeoutMs: 10000, maxBytes: 1_500_000 });
     if (r.ok) extractEmails(r.text, domain).forEach((e) => all.add(e));
     if (all.size >= 5) break;
   }
