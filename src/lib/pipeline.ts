@@ -5,9 +5,9 @@ import { brand } from "./brand";
 import { env } from "./env";
 import { humanise } from "./sequence/humanise";
 import { toDomain } from "./http";
-import { entityTypeFromCompanyType, firstDirector, isCorporateSubscriber, matchCompany, searchNewCompanies } from "./leads/companiesHouse";
+import { companyFromSiteText, entityTypeFromCompanyType, firstDirector, isCorporateSubscriber, matchCompany, searchNewCompanies, type ChCompany } from "./leads/companiesHouse";
 import type { LeadInput } from "./leads/csv";
-import { findEmail } from "./leads/email";
+import { findEmail, siteLegalText } from "./leads/email";
 import { cityFrom, postcodeFrom, searchPlaces } from "./leads/places";
 import { fetchNewMail, stripQuoted } from "./mail/inbox";
 import { sendMail } from "./mail/send";
@@ -145,6 +145,19 @@ export async function importFromCompaniesHouse(
   return { ...r, found: companies.length };
 }
 
+/**
+ * PECR: work out whether a lead is a corporate subscriber. Exact name match on Companies House
+ * first, then the company number the website prints (Google listings use trading names).
+ */
+export async function resolveEntity(lead: Pick<Lead, "company" | "website" | "source_ref">): Promise<Record<string, unknown>> {
+  if (!env.companiesHouseKey()) return {};
+  let match: ChCompany | null = await matchCompany(lead.company, null).catch(() => null);
+  if (!match && lead.website) match = await companyFromSiteText(await siteLegalText(lead.website)).catch(() => null);
+  if (!match) return {};
+  const et = entityTypeFromCompanyType(match.company_type);
+  return { entity_type: et, pecr_ok: isCorporateSubscriber(et), source_ref: lead.source_ref ?? match.company_number };
+}
+
 // ---------- 2. enrich ----------
 
 export async function enrichLeads(limit = 10) {
@@ -154,15 +167,7 @@ export async function enrichLeads(limit = 10) {
       const patch: Record<string, unknown> = {};
 
       // PECR: work out whether this is a corporate subscriber.
-      if (lead.entity_type === "unknown" && env.companiesHouseKey()) {
-        const match = await matchCompany(lead.company, null).catch(() => null);
-        if (match) {
-          const et = entityTypeFromCompanyType(match.company_type);
-          patch.entity_type = et;
-          patch.pecr_ok = isCorporateSubscriber(et);
-          patch.source_ref = lead.source_ref ?? match.company_number;
-        }
-      }
+      if (lead.entity_type === "unknown") Object.assign(patch, await resolveEntity(lead));
 
       if (!lead.website && !lead.email) {
         await setLead(lead.id, { ...patch, status: "error", last_error: "No website or email. Add one manually, then reset to 'new'." });

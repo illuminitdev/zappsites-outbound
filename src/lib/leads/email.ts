@@ -65,6 +65,24 @@ export async function scrapeSiteEmails(website: string): Promise<string[]> {
   return extractEmails([...all].join(" "), domain);
 }
 
+/** Text of the pages where UK sites print their company number (footer, legal pages). */
+export async function siteLegalText(website: string): Promise<string> {
+  let origin = website.replace(/\/$/, "");
+  try {
+    origin = new URL(/^https?:\/\//i.test(website) ? website : `https://${website}`).origin;
+  } catch {
+    /* keep the raw value */
+  }
+  const parts: string[] = [];
+  for (const p of ["", "/privacy-policy", "/contact-us"]) {
+    const r = await fetchText(origin + p, { timeoutMs: 8000, maxBytes: 1_500_000 });
+    if (!r.ok) continue;
+    parts.push(r.text.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&"));
+    if (/registered|company\s*(?:reg|no|number)/i.test(parts.at(-1)!)) break;
+  }
+  return parts.join(" ").replace(/\s+/g, " ");
+}
+
 export async function hasMx(domain: string): Promise<boolean> {
   try {
     const mx = await dns.resolveMx(domain);

@@ -73,6 +73,46 @@ export async function firstDirector(companyNumber: string): Promise<{ first: str
   return first ? { first: cap(first), last: cap(surname ?? "") } : null;
 }
 
+/** One company by its registration number, or null if it doesn't exist. */
+export async function getCompany(companyNumber: string): Promise<ChCompany | null> {
+  // The profile endpoint calls it "type"; search results call it "company_type".
+  const c = await fetchJson<ChCompany & { type?: string }>(`${BASE}/company/${encodeURIComponent(companyNumber)}`, {
+    headers: auth(),
+  }).catch(() => null);
+  return c?.company_number ? { ...c, company_type: c.company_type ?? c.type } : null;
+}
+
+// "Registered in England No. 06012879", "Company Reg Number 02118024", "Company number: SC123456".
+// Deliberately not "register number" / "firm reference": that is the FCA number, not Companies House.
+const COMPANY_NO_RE =
+  /(?:company\s*(?:registration|reg\.?)?\s*(?:no\.?|number|num)|registered\s+(?:in\s+(?:england|scotland|wales|northern\s+ireland)(?:\s*(?:&|and)\s*wales)?[\s,.:-]*(?:(?:company|under)\s*)?(?:no\.?|number)?|(?:company\s*)?(?:no\.?|number))|registration\s*(?:no\.?|number))\s*[.:#-]?\s*((?:SC|NI|OC|SO|NC)\d{6}|\d{6,8})\b/gi;
+
+/** Company numbers a site states about itself, padded to Companies House's 8 characters. */
+export function extractCompanyNumbers(text: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.matchAll(COMPANY_NO_RE)) {
+    const n = m[1].toUpperCase();
+    out.add(/^\d+$/.test(n) ? n.padStart(8, "0") : n);
+  }
+  return [...out];
+}
+
+/**
+ * Confirm the legal entity from the company number printed on the site (UK companies must show it).
+ * A number only counts if the company it belongs to is active and its registered name also appears
+ * on the site, so an FCA number or a stray number can't be mistaken for the company.
+ */
+export async function companyFromSiteText(text: string): Promise<ChCompany | null> {
+  const page = normaliseCompanyName(text);
+  for (const num of extractCompanyNumbers(text).slice(0, 3)) {
+    const c = await getCompany(num);
+    if (!c || (c.company_status && c.company_status !== "active")) continue;
+    const name = normaliseCompanyName(c.company_name ?? "");
+    if (name.length >= 3 && page.includes(name)) return c;
+  }
+  return null;
+}
+
 const STRIP = /\b(limited|ltd|llp|plc|the|and|&|uk|services|group)\b|[^a-z0-9 ]/g;
 export function normaliseCompanyName(n: string): string {
   return n.toLowerCase().replace(STRIP, " ").replace(/\s+/g, " ").trim();
