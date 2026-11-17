@@ -417,24 +417,26 @@ export async function startCheck(f: FormData) {
   redirect(`/check/${slug}`);
 }
 
-export async function bookCall(f: FormData) {
-  const back = str(f, "back") || "/book";
-  let id: string;
+export type BookState = { ok: true; id: string; name: string; email: string } | { ok: false; error: string } | null;
+
+/** Public booking form. Returns the result to the page, which shows a confirmation popup (no separate page). */
+export async function bookCall(_prev: BookState, f: FormData): Promise<BookState> {
   try {
-    id = await createBooking({
+    const id = await createBooking({
       slot: str(f, "slot"),
       name: str(f, "name"),
       email: str(f, "email"),
       phone: str(f, "phone") || null,
       company: str(f, "company") || null,
+      website: str(f, "website") || null,
       method: str(f, "method") === "video" ? "video" : "phone",
       note: str(f, "note") || null,
       leadSlug: str(f, "lead") || null,
     });
+    return { ok: true, id, name: str(f, "name"), email: str(f, "email") };
   } catch (e) {
-    redirect(`${back}?error=${encodeURIComponent((e as Error).message)}`);
+    return { ok: false, error: (e as Error).message };
   }
-  redirect(`/book/done?b=${id}`);
 }
 
 /** Admin: cancel a booking. Frees the slot on the booking page. */
@@ -444,6 +446,15 @@ export async function cancelBooking(f: FormData) {
   must(await db().from("bookings").update({ status: "cancelled" }).eq("id", str(f, "id")));
   revalidatePath("/bookings");
   back("/bookings", "Booking cancelled. That time is free again.");
+}
+
+/** Admin: delete a booking for good (e.g. test bookings). Frees the slot if it was still confirmed. */
+export async function deleteBooking(f: FormData) {
+  const user = await sessionUserId((await cookies()).get(SESSION_COOKIE)?.value);
+  if (!user) redirect("/login");
+  must(await db().from("bookings").delete().eq("id", str(f, "id")));
+  revalidatePath("/bookings");
+  back("/bookings", "Booking deleted.");
 }
 
 export async function confirmUnsubscribe(f: FormData) {

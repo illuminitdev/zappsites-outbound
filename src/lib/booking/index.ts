@@ -22,6 +22,7 @@ export interface BookingInput {
   email: string;
   phone: string | null;
   company: string | null;
+  website: string | null;
   method: "phone" | "video";
   note: string | null;
   leadSlug: string | null;
@@ -34,28 +35,43 @@ export async function createBooking(i: BookingInput): Promise<string> {
   const { slots, availability } = await openSlots();
   if (!slots.some((s) => s.iso === i.slot)) throw new Error("Sorry, that time has just gone. Please pick another.");
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(i.email)) throw new Error("Please check your email address.");
-  if (i.method === "phone" && !i.phone) throw new Error("Please add a phone number so I can call you.");
+  if (!i.company?.trim()) throw new Error("Please add your company name.");
+  if (i.method === "video" && !videoUrl()) i.method = "phone";
+  if (i.website) {
+    const w = /^https?:\/\//i.test(i.website) ? i.website.trim() : `https://${i.website.trim()}`;
+    try {
+      const u = new URL(w);
+      if (!u.hostname.includes(".")) throw new Error();
+      i.website = u.href.replace(/\/$/, "");
+    } catch {
+      throw new Error("Please check your website address (e.g. yourbusiness.co.uk).");
+    }
+  }
 
   const lead = i.leadSlug
     ? (must(await db().from("leads").select("*").eq("slug", i.leadSlug).maybeSingle()) as Lead | null)
     : null;
   const start = new Date(i.slot);
   const end = new Date(start.getTime() + availability.slotMinutes * 60000);
-  const res = await db()
-    .from("bookings")
-    .insert({
-      lead_id: lead?.id ?? null,
-      name: i.name,
-      email: i.email.toLowerCase(),
-      phone: i.phone,
-      company: i.company ?? lead?.company ?? null,
-      method: i.method,
-      note: i.note,
-      start_at: start.toISOString(),
-      end_at: end.toISOString(),
-    })
-    .select("id")
-    .single();
+  const row = {
+    lead_id: lead?.id ?? null,
+    name: i.name,
+    email: i.email.toLowerCase(),
+    phone: i.phone,
+    company: i.company ?? lead?.company ?? null,
+    website: i.website,
+    method: i.method,
+    note: i.note,
+    start_at: start.toISOString(),
+    end_at: end.toISOString(),
+  };
+  let res = await db().from("bookings").insert(row).select("id").single();
+  if (res.error && /website/.test(res.error.message)) {
+    // Migration 0009 (bookings.website) not run yet: keep the website in the note instead.
+    const { website, ...rest } = row;
+    const note = [website ? `Website: ${website}` : "", i.note ?? ""].filter(Boolean).join("\n") || null;
+    res = await db().from("bookings").insert({ ...rest, note }).select("id").single();
+  }
   if (res.error) {
     if (/duplicate|unique/i.test(res.error.message)) throw new Error("Sorry, that time has just gone. Please pick another.");
     throw new Error("Something went wrong saving your booking. Please try again.");
@@ -73,7 +89,12 @@ async function notify(id: string, i: BookingInput, start: Date, minutes: number,
   if (!box) return;
   const when = new Intl.DateTimeFormat("en-GB", { timeZone: tz, weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(start);
   const video = videoUrl();
-  const how = i.method === "video" && video ? `Video call: ${video}` : `I'll call you on ${i.phone}`;
+  const how =
+    i.method === "video" && video
+      ? `Video call: ${video}`
+      : i.phone
+        ? `${brand.person} will call you on ${i.phone}`
+        : `We'll email you before the call with how to join`;
   const company = i.company ?? lead?.company ?? "";
   const auditLink = lead ? `${env.appUrl}/p/${lead.slug}` : null;
   const ics = buildIcs({
@@ -81,26 +102,38 @@ async function notify(id: string, i: BookingInput, start: Date, minutes: number,
     start,
     minutes,
     summary: `${brand.name} call${company ? ` with ${company}` : ""}`,
-    description: [how, auditLink ? `Audit: ${auditLink}` : "", i.note ? `Note: ${i.note}` : ""].filter(Boolean).join("\n"),
+    description: [how, i.website ? `Website: ${i.website}` : "", auditLink ? `Audit: ${auditLink}` : "", i.note ? `Note: ${i.note}` : ""].filter(Boolean).join("\n"),
     organizerEmail: box.email,
     organizerName: `${brand.person}, ${brand.name}`,
     attendeeEmail: i.email,
     location: i.method === "video" && video ? video : i.phone ? `Phone: ${i.phone}` : undefined,
   });
 
+  const day = new Intl.DateTimeFormat("en-GB", { timeZone: tz, weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(start);
+  const time = (d: Date) => new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+  const endAt = new Date(start.getTime() + minutes * 60000);
   const first = i.name.split(/\s+/)[0];
   await sendMail(box, {
     to: i.email,
-    subject: `booked: ${when}`,
+    subject: `Confirmed: your ${brand.name} call on ${day} at ${time(start)}`,
     text: `Hi ${first},
 
-Thanks, that's in for ${when} (UK time), 15 minutes.
-${how}.
+Your call is booked and confirmed.
 
-If you need to move it, just reply to this email.
+  Date:  ${day}
+  Time:  ${time(start)} – ${time(endAt)} (UK time), ${minutes} minutes
+  With:  ${brand.person}, ${brand.name}
+  How:   ${how}
+${company ? `  Company:  ${company}
+` : ""}${i.website ? `  Website:  ${i.website}
+` : ""}
+A calendar invite is attached, so you can add it to your calendar in one click.
 
+Need to change the time? Just reply to this email or call ${brand.phone}.
+
+Speak soon,
 ${brand.person}
-${brand.name} · ${brand.phone}`,
+${brand.name} · ${brand.phone} · ${brand.url.replace(/^https?:\/\//, "")}`,
     icalEvent: ics,
   });
 
@@ -113,7 +146,8 @@ ${brand.name} · ${brand.phone}`,
       text: [
         `${i.name}${company ? ` (${company})` : ""} booked ${when}.`,
         `Email: ${i.email}`,
-        i.phone ? `Phone: ${i.phone}` : "",
+        i.phone ? `Phone: ${i.phone}` : "Phone: (not given)",
+        i.website ? `Website: ${i.website}` : "",
         `Method: ${i.method}`,
         i.note ? `Note: ${i.note}` : "",
         auditLink ? `Their audit: ${auditLink}` : "",

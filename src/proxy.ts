@@ -4,7 +4,7 @@ import { SESSION_COOKIE, isValidSession } from "@/lib/session";
 // Everything needs an admin session except prospect-facing pages, the login page and cron endpoints
 // (cron endpoints check their own bearer secret).
 // "/book" and "/check" are matched as whole segments so admin pages like "/bookings" stay protected.
-const PUBLIC_PREFIXES = ["/login", "/p/", "/u/", "/book", "/check", "/api/cron/", "/api/public/", "/_next/", "/favicon", "/zappsites-outbound-logo.png"];
+const PUBLIC_PREFIXES = ["/login", "/p/", "/u/", "/book", "/check", "/api/cron/", "/api/public/", "/_next/", "/favicon", "/zappsites-outbound-logo.png", "/zappsites-logo-light.png"];
 const SEGMENT_PREFIXES = new Set(["/login", "/book", "/check"]);
 
 export async function proxy(req: NextRequest) {

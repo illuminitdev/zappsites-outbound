@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CalendarCheck, ExternalLink } from "lucide-react";
-import { cancelBooking } from "@/app/actions";
+import { cancelBooking, deleteBooking } from "@/app/actions";
+import { ConfirmForm } from "@/components/ConfirmForm";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, Flash } from "@/components/ui";
 import { db } from "@/lib/db";
@@ -14,6 +15,7 @@ type Booking = {
   email: string;
   phone: string | null;
   company: string | null;
+  website?: string | null;
   method: string;
   note: string | null;
   start_at: string;
@@ -95,7 +97,7 @@ export default async function Bookings({ searchParams }: { searchParams: Promise
                   <th>Call type</th>
                   <th>Note</th>
                   <th>Booked</th>
-                  {tab === "upcoming" && <th />}
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -110,6 +112,13 @@ export default async function Bookings({ searchParams }: { searchParams: Promise
                       <div className="muted small">
                         {b.lead_id ? <Link href={`/leads/${b.lead_id}`}>{b.company ?? "View lead"}</Link> : (b.company ?? "")}
                       </div>
+                      {b.website && (
+                        <div className="small">
+                          <a href={b.website} target="_blank" rel="noreferrer">
+                            {b.website.replace(/^https?:\/\//, "")}
+                          </a>
+                        </div>
+                      )}
                     </td>
                     <td>
                       <a href={`mailto:${b.email}`}>{b.email}</a>
@@ -128,16 +137,24 @@ export default async function Bookings({ searchParams }: { searchParams: Promise
                     <td className="muted small" style={{ whiteSpace: "nowrap" }}>
                       {fmt(b.created_at, { day: "numeric", month: "short" })}
                     </td>
-                    {tab === "upcoming" && (
-                      <td>
-                        <form action={cancelBooking}>
+                    <td>
+                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                        {tab === "upcoming" && (
+                          <form action={cancelBooking}>
+                            <input type="hidden" name="id" value={b.id} />
+                            <SubmitButton className="secondary sm" pending="Cancelling...">
+                              Cancel
+                            </SubmitButton>
+                          </form>
+                        )}
+                        <ConfirmForm action={deleteBooking} message={`Delete the booking for ${b.name} permanently? This can't be undone.`}>
                           <input type="hidden" name="id" value={b.id} />
-                          <SubmitButton className="secondary sm" pending="Cancelling...">
-                            Cancel
+                          <SubmitButton className="secondary sm danger" pending="Deleting...">
+                            Delete
                           </SubmitButton>
-                        </form>
-                      </td>
-                    )}
+                        </ConfirmForm>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
