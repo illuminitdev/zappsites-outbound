@@ -93,6 +93,8 @@
 .timeField { display: flex; align-items: center; gap: 12px; padding: 0 16px 0 14px; border: 1.5px solid #dcd7ce; border-radius: 14px; background: #fff; color: var(--muted); transition: border-color .15s, box-shadow .15s; }
 .timeField:focus-within { border-color: var(--orange); box-shadow: 0 0 0 4px rgba(247, 147, 30, .18); }
 .timeField input { flex: 1; min-width: 0; padding: 16px 0; border: 0; outline: none; background: transparent; font: inherit; font-size: 22px; font-weight: 700; color: var(--ink); }
+/* The outer box already shows focus; no second outline on the input itself. */
+.timeField input:focus, .timeField input:focus-visible { outline: none; border: 0; box-shadow: none; }
 .timeField input::placeholder { font-weight: 500; color: #a7abb2; }
 .timeFieldOk, .timeFieldOk:focus-within { border-color: #3aa35c; box-shadow: 0 0 0 4px rgba(58, 163, 92, .15); }
 .timeFieldBad { border-color: #e59a3a; }
