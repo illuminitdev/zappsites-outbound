@@ -1077,3 +1077,77 @@ img, svg, video { max-width: 100%; }
 .csv-form button[type="submit"] { display: flex; align-items: center; justify-content: center; gap: 8px; height: 46px; margin-top: 6px; font-weight: 700; }
 .csv-templates { display: inline-flex; align-items: center; gap: 5px; text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 500; color: var(--muted); }
 .csv-templates a { color: var(--accent-text); font-weight: 600; }
+
+/* ---- Lead progress tracker (lead page) ---- */
+.lp-now { border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; background: var(--accent-faint); border: 1px solid var(--accent-line); }
+.lp-now.stuck { background: #fdf1ef; border-color: #f2c4bf; }
+.lp-now.done { background: #eef8f3; border-color: #bfe3d1; }
+.lp-now-label { display: block; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-text); }
+.lp-now.stuck .lp-now-label { color: var(--bad); }
+.lp-now.done .lp-now-label { color: var(--good); }
+.lp-now p { margin: 2px 0 0; font-weight: 600; font-size: 14.5px; }
+.lp-bar { height: 6px; border-radius: 99px; background: var(--bg); overflow: hidden; margin-bottom: 16px; }
+.lp-bar span { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.lp-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.lp-step { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); }
+.lp-step b { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 13.5px; }
+.lp-step small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere; }
+.lp-dot { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--bg); color: var(--muted); }
+.lp-tag { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: var(--bg); color: var(--muted); white-space: nowrap; }
+.lp-step.done .lp-dot { background: var(--good); color: #fff; }
+.lp-step.done .lp-tag { background: #e7f6ef; color: var(--good); }
+.lp-step.now { border-color: var(--accent); background: var(--accent-faint); box-shadow: 0 0 0 3px var(--accent-soft); }
+.lp-step.now .lp-dot { background: var(--accent); color: #fff; }
+.lp-step.now .lp-tag { background: var(--accent); color: #fff; }
+.lp-step.stuck { border-color: #f2c4bf; background: #fdf1ef; }
+.lp-step.stuck .lp-dot { background: var(--bad); color: #fff; }
+.lp-step.stuck .lp-tag { background: var(--bad); color: #fff; }
+.lp-step.todo { opacity: .7; }
+@media (max-width: 1100px) { .lp-steps { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .lp-steps { grid-template-columns: 1fr; } }
+
+/* ---- Lead status: header button, "where it is now" strip, popover window ---- */
+.lp-btn { display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--accent); background: var(--accent); color: var(--ink); font-weight: 700; font-size: 14px; cursor: pointer; box-shadow: 0 4px 12px rgba(247, 147, 30, .25); }
+.lp-btn:hover { filter: brightness(1.05); }
+.lp-btn-dot { width: 9px; height: 9px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.45); }
+.lp-btn.stuck .lp-btn-dot { background: var(--bad); }
+.lp-btn.done .lp-btn-dot { background: var(--good); }
+.lp-btn-sub { font-weight: 500; font-size: 12.5px; padding-left: 8px; border-left: 1px solid rgba(22,24,29,.25); }
+
+.lp-strip { width: 100%; margin: 0 0 20px; display: grid; grid-template-columns: auto 1fr 160px auto; align-items: center; gap: 14px; text-align: left; padding: 12px 16px; border-radius: 12px; cursor: pointer; font: inherit; color: var(--ink); background: var(--accent-faint); border: 1px solid var(--accent-line); transition: box-shadow .12s; }
+.lp-strip:hover { box-shadow: 0 4px 14px rgba(22,24,29,.07); }
+.lp-strip.stuck { background: #fdf1ef; border-color: #f2c4bf; }
+.lp-strip.done { background: #eef8f3; border-color: #bfe3d1; }
+.lp-strip-icon { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--accent); color: #fff; }
+.lp-strip.stuck .lp-strip-icon { background: var(--bad); }
+.lp-strip.done .lp-strip-icon { background: var(--good); }
+.lp-strip-text { min-width: 0; }
+.lp-strip-text b { display: block; font-size: 14.5px; }
+.lp-strip-text b span { font-weight: 500; color: var(--muted); }
+.lp-strip-bar { height: 6px; border-radius: 99px; background: rgba(22,24,29,.08); overflow: hidden; }
+.lp-strip-bar span { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.lp-strip.done .lp-strip-bar span { background: var(--good); }
+.lp-strip-more { font-size: 12.5px; font-weight: 650; color: var(--accent-text); white-space: nowrap; }
+.lp-strip.stuck .lp-strip-more { color: var(--bad); }
+
+.lp-window { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; padding: 22px 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); color: var(--ink); box-shadow: 0 24px 60px rgba(22,24,29,.25); }
+.lp-window::backdrop { background: rgba(22,24,29,.45); backdrop-filter: blur(2px); }
+.lp-close { margin: 0; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--muted); cursor: pointer; padding: 0; }
+.lp-close:hover { background: var(--bg); color: var(--ink); }
+.lp-num { font-style: normal; color: var(--muted); font-weight: 600; }
+
+/* Lead page polish */
+.ld-panel { border-radius: 14px; box-shadow: 0 1px 2px rgba(22,24,29,.04); }
+.ld-panel-head { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.ld-side-card { border-radius: 14px; }
+@media (max-width: 900px) {
+  .lp-strip { grid-template-columns: auto 1fr; }
+  .lp-strip-bar, .lp-strip-more { grid-column: 2; }
+}
+
+/* Lead page header: name gets the room, buttons sit in two rows on the right */
+.ld-hero-main { flex: 1 1 320px; min-width: 280px; }
+.ld-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; flex: 0 1 auto; }
+.ld-actions .head-actions { justify-content: flex-end; }
+.ld-actions .head-actions form, .ld-actions .head-actions button { margin: 0; }
+@media (max-width: 900px) { .ld-actions { align-items: flex-start; width: 100%; } .ld-actions .head-actions { justify-content: flex-start; } }

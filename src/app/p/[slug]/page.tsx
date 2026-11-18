@@ -5,7 +5,6 @@ import { GoogleTag } from "@/components/GoogleTag";
 import { displayScore, groupChecks, HIGH_ISSUE_CEILING } from "@/lib/audit/analyze";
 import { brand } from "@/lib/brand";
 import { db } from "@/lib/db";
-import { fixPlan } from "@/lib/offers";
 import type { AeoAudit, Audit, AuditCheck, Lead } from "@/lib/types";
 import { PrintButton } from "./PrintButton";
 import s from "./p.module.css";
@@ -52,6 +51,27 @@ function Ring({ score }: { score: number }) {
         out of 100
       </text>
     </svg>
+  );
+}
+
+/** Small line icons for the three stat cards. */
+const ICON = {
+  speed: "M12 14l4-4M3.5 15a9 9 0 1 1 17 0",
+  issues: "M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
+  time: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z",
+  ai: "M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12zM9 11h.01M12 11h.01M15 11h.01",
+} as const;
+
+function StatHead({ icon, children }: { icon: keyof typeof ICON; children: React.ReactNode }) {
+  return (
+    <span className={s.statHead}>
+      <i className={s.statIcon}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d={ICON[icon]} />
+        </svg>
+      </i>
+      {children}
+    </span>
   );
 }
 
@@ -147,61 +167,63 @@ function AeoSection({ aeo, company }: { aeo: AeoAudit; company: string }) {
 }
 
 function Checklist({ checks }: { checks: AuditCheck[] }) {
-  const groups = groupChecks(checks);
-  const counted = checks.filter((c) => !c.unverified);
+  // Only what's wrong: passed checks and ones we couldn't verify are left off the report.
+  const groups = groupChecks(checks)
+    .map((g) => ({ ...g, fails: g.checks.filter((c) => !c.pass && !c.unverified) }))
+    .filter((g) => g.fails.length > 0)
+    .sort((x, y) => y.fails.length - x.fails.length);
+  if (!groups.length) return null;
+  const total = groups.reduce((n, g) => n + g.fails.length, 0);
+  const byImpact = (x: AuditCheck, y: AuditCheck) => IMPACT_ORDER[x.impact] - IMPACT_ORDER[y.impact];
   return (
     <section className={s.section}>
       <div className={s.sectionHead}>
-        <span className={s.kicker}>Everything we checked</span>
-        <h2>Full checklist</h2>
-        <p>
-          {counted.filter((c) => c.pass).length} of {counted.length} checks passed, across {groups.length} areas.
-        </p>
+        <span className={s.kicker}>Everything to fix</span>
+        <h2>
+          {total} thing{total === 1 ? "" : "s"} holding your site back
+        </h2>
+        <p>Grouped by area, with the most important first in each.</p>
       </div>
       <div className={s.groups}>
-        {groups.map((g) => {
-          // Failed first, then passed, then the ones we couldn't check.
-          const rank = (c: AuditCheck) => (c.unverified ? 2 : c.pass ? 1 : 0);
-          const list = [...g.checks].sort((a, b) => rank(a) - rank(b));
-          return (
-            <div key={g.category} className={s.group}>
-              <div className={s.groupHead}>
-                <h3>{g.label}</h3>
-                <span className={`${s.tally} ${g.passed === g.total ? s.good : g.passed / Math.max(g.total, 1) < 0.5 ? s.bad : s.warn}`}>
-                  {g.passed}/{g.total}
-                </span>
-              </div>
-              <ul>
-                {list.map((c) => (
-                  <li key={c.id}>
-                    <Mark pass={c.unverified ? null : c.pass} />
-                    <div>
-                      <b>{c.label}</b>
-                      <small>{c.unverified ? `Couldn't check. ${plain(c.detail)}` : c.pass ? plain(c.detail) || "Looks good." : plain(c.detail)}</small>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+        {groups.map((g) => (
+          <div key={g.category} className={s.group}>
+            <div className={s.groupHead}>
+              <h3>{g.label}</h3>
+              <span className={s.count}>
+                {g.fails.length} to fix
+              </span>
             </div>
-          );
-        })}
+            <ul>
+              {[...g.fails].sort(byImpact).map((c) => (
+                <li key={c.id}>
+                  <Mark pass={false} />
+                  <div>
+                    <b>{HEADLINE[c.id] ?? c.label}</b>
+                    <small>{plain(c.detail)}</small>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </div>
     </section>
   );
 }
 
-function Cta({ book, offer }: { book: string; offer: string | null }) {
+function Cta({ book, bookAbs, offer, name }: { book: string; bookAbs: string; offer: string | null; name: string | null }) {
   return (
     <section className={s.cta}>
       <div>
-        <span className={s.kicker}>Next step</span>
+        <span className={s.kicker}>Thank you for reading{name ? `, ${name}` : ""}</span>
         <h2>Want these fixed?</h2>
-        <p>{offer ?? "We'll walk you through every fix in 15 minutes, and you can keep this report either way. No obligation."}</p>
+        <p>{offer ?? "Book a free 15-minute call and we'll walk you through every fix, in plain English. You keep this report either way. No obligation."}</p>
       </div>
       <div className={s.ctaSide}>
         <a className={s.btn} href={book}>
           Book a free 15-minute call →
         </a>
+        <span className={s.printLink}>Book a call: {bookAbs}</span>
         <small>
           Or call {brand.phone} · <a href={`mailto:${brand.email}`}>{brand.email}</a>
         </small>
@@ -275,51 +297,6 @@ const FIX: Record<string, string> = {
   og_tags: "set a title and picture for link previews.",
 };
 
-function FixPlanSection({ a }: { a: Audit | null }) {
-  if (process.env.SHOW_FIX_PLAN === "false") return null;
-  const plan = fixPlan(a);
-  if (!plan.steps.length) return null;
-  const gbp = (n: number) => `£${n}`;
-  return (
-    <section className={s.section}>
-      <div className={s.sectionHead}>
-        <span className={s.kicker}>Pricing</span>
-        <h2>What we&apos;d fix, and what it costs</h2>
-      </div>
-      <div className={s.plan}>
-        {plan.steps.map((st) => (
-          <div key={st.offer.id} className={s.planStep}>
-            <div className={s.planHead}>
-              <h3>{st.offer.name}</h3>
-              <span className={s.price}>
-                {gbp(st.offer.price)} <small>a month</small>
-              </span>
-            </div>
-            <p>{st.offer.blurb}</p>
-            {st.fixes.length > 0 && (
-              <ul>
-                {st.fixes.slice(0, 6).map((c) => (
-                  <li key={c.id}>{c.label}</li>
-                ))}
-                {st.fixes.length > 6 && <li>and {st.fixes.length - 6} more from the checklist</li>}
-              </ul>
-            )}
-            {plan.noWebsite && st.offer.id === "essential" && <ul><li>A website for customers and AI assistants to find</li></ul>}
-            <div className={s.term}>{st.offer.term}</div>
-          </div>
-        ))}
-        {plan.bundle && (
-          <div className={s.total}>
-            Together that&apos;s {gbp(plan.monthly)} a month. Or the <b>{plan.bundle.name}</b> at {gbp(plan.bundle.price)} a month, which adds online
-            booking and tracking of every call, form and booking ({plan.bundle.term}).
-          </div>
-        )}
-      </div>
-      <p className={s.note}>Prices from {brand.url.replace(/^https?:\/\//, "")}/pricing. We&apos;ll confirm everything on the call before you commit to anything.</p>
-    </section>
-  );
-}
-
 export default async function AuditPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const { data: lead } = await db().from("leads").select("*").eq("slug", slug).maybeSingle<Lead>();
@@ -328,18 +305,21 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
     ? await db().from("campaigns").select("offer").eq("id", lead.campaign_id).maybeSingle<{ offer: string }>()
     : { data: null };
 
-  const ua = (await headers()).get("user-agent") ?? "";
+  const h = await headers();
+  const ua = h.get("user-agent") ?? "";
   if (!BOT.test(ua)) await db().from("events").insert({ lead_id: lead.id, type: "page_view", meta: { ua: ua.slice(0, 200) } });
 
   const a: Audit | null = lead.audit;
   const hi = lead.first_name ? `Hi ${lead.first_name}. ` : "";
   const date = new Date(a?.fetchedAt ?? lead.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-  // Checks we couldn't verify (JS-built or bot-protected sites) are shown as "couldn't check" and left out of the counts.
+  // Checks we couldn't verify (JS-built or bot-protected sites) are left out of the report and the counts.
   const fails = a?.checks.filter((c) => !c.pass && !c.unverified) ?? [];
   const passed = a?.checks.filter((c) => c.pass && !c.unverified).length ?? 0;
   const skipped = a?.checks.filter((c) => c.unverified).length ?? 0;
   const top = a?.topIssues?.length ? a.topIssues : [...fails].sort((x, y) => IMPACT_ORDER[x.impact] - IMPACT_ORDER[y.impact]).slice(0, 3);
   const book = `/api/public/go/${lead.slug}`;
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  const bookAbs = host ? `${h.get("x-forwarded-proto") ?? "https"}://${host}${book}` : book;
   const ok = !!a?.url && a.reachable;
   const score = ok ? displayScore(a!) : 0;
   const v = ok ? verdict(score) : null;
@@ -385,8 +365,8 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
             {ok && skipped > 0 && (
               <p className={s.notice}>
                 {a!.content === "blocked"
-                  ? `Your site blocks automated checks, so we skipped ${skipped} checks rather than guess. They're marked "couldn't check" below.`
-                  : `${a!.platform && a!.platform !== "JavaScript app" ? `Your site is built on ${a!.platform} and` : "Your site"} loads its content with JavaScript, so we skipped ${skipped} checks rather than guess. They're marked "couldn't check" below.`}
+                  ? `Your site blocks automated checks, so we skipped ${skipped} checks rather than guess. They're left out of this report.`
+                  : `${a!.platform && a!.platform !== "JavaScript app" ? `Your site is built on ${a!.platform} and` : "Your site"} loads its content with JavaScript, so we skipped ${skipped} checks rather than guess. They're left out of this report.`}
               </p>
             )}
           </div>
@@ -407,18 +387,18 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
         {ok && (
           <div className={s.stats}>
             <div className={s.stat}>
-              <span>Mobile speed</span>
+              <StatHead icon="speed">Mobile speed</StatHead>
               <b className={mobile != null ? s[tone(mobile)] : ""}>{mobile ?? "–"}</b>
               <small>out of 100 on Google PageSpeed</small>
             </div>
             <div className={s.stat}>
-              <span>Issues found</span>
+              <StatHead icon="issues">Issues found</StatHead>
               <b className={fails.length ? s.bad : s.good}>{fails.length}</b>
               <small>{passed} checks passed</small>
             </div>
             {a!.aeo ? (
               <div className={s.stat}>
-                <span>AI recommends you</span>
+                <StatHead icon="ai">AI recommends you</StatHead>
                 <b className={a!.aeo.mentions ? s.warn : s.bad}>
                   {a!.aeo.mentions}/{a!.aeo.answered}
                 </b>
@@ -426,7 +406,7 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
               </div>
             ) : (
               <div className={s.stat}>
-                <span>Load time</span>
+                <StatHead icon="time">Load time</StatHead>
                 <b className={a!.performance.lcpSeconds != null ? s[a!.performance.lcpSeconds <= 2.5 ? "good" : a!.performance.lcpSeconds <= 4 ? "warn" : "bad"] : ""}>
                   {a!.performance.lcpSeconds != null ? `${a!.performance.lcpSeconds.toFixed(1)}s` : "–"}
                 </b>
@@ -497,21 +477,9 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
 
         {a?.aeo && <AeoSection aeo={a.aeo} company={lead.company} />}
 
-        {ok && top.length > 0 && (
-          <>
-            <FixPlanSection a={a} />
-            <Cta book={book} offer={campaign?.offer ?? null} />
-          </>
-        )}
-
         {ok && <Checklist checks={a!.checks} />}
 
-        {!(ok && top.length > 0) && (
-          <>
-            <FixPlanSection a={a} />
-            <Cta book={book} offer={campaign?.offer ?? null} />
-          </>
-        )}
+        <Cta book={book} bookAbs={bookAbs} offer={campaign?.offer ?? null} name={lead.first_name ?? null} />
 
         <footer className={s.foot}>
           Automated check of publicly available pages on {date}. Speed data from Google PageSpeed Insights

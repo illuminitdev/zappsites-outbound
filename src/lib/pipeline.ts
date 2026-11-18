@@ -149,13 +149,70 @@ export async function importFromCompaniesHouse(
  * PECR: work out whether a lead is a corporate subscriber. Exact name match on Companies House
  * first, then the company number the website prints (Google listings use trading names).
  */
-export async function resolveEntity(lead: Pick<Lead, "company" | "website" | "source_ref">): Promise<Record<string, unknown>> {
+export async function resolveEntity(lead: Pick<Lead, "company" | "website" | "source_ref"> & { city?: string | null; email?: string | null }): Promise<Record<string, unknown>> {
   if (!env.companiesHouseKey()) return {};
-  let match: ChCompany | null = await matchCompany(lead.company, null).catch(() => null);
-  if (!match && lead.website) match = await companyFromSiteText(await siteLegalText(lead.website)).catch(() => null);
+  let match: ChCompany | null = null;
+  // Google listings often add the town or "Co" to the name: try those variants too (still an exact match).
+  for (const name of nameVariants(lead.company, lead.city ?? null)) {
+    match = await matchCompany(name, null).catch(() => null);
+    if (match) break;
+  }
+  // Then the company number printed on the website (and on the email's domain, if that's a different site).
+  const sites = [lead.website, lead.email ? `https://${lead.email.split("@")[1]}` : null].filter((s): s is string => !!s);
+  for (const site of [...new Set(sites.map((s) => toDomain(s) ?? s))].map((d) => (d.includes("://") ? d : `https://${d}`))) {
+    if (match) break;
+    match = await companyFromSiteText(await siteLegalText(site)).catch(() => null);
+  }
   if (!match) return {};
   const et = entityTypeFromCompanyType(match.company_type);
   return { entity_type: et, pecr_ok: isCorporateSubscriber(et), source_ref: lead.source_ref ?? match.company_number };
+}
+
+const FREE_MAIL = /^(gmail|googlemail|hotmail|outlook|live|yahoo|icloud|aol|btinternet|sky|virginmedia|talktalk)\./i;
+
+/** The listed name, plus the same name without the town or a trailing "Co"/"Company". */
+function nameVariants(company: string, city: string | null): string[] {
+  const out = [company];
+  const town = (city ?? "").replace(/[^\w\s'-]/g, "").trim();
+  const noCity = town ? company.replace(new RegExp(`\\b${town}\\b`, "i"), " ") : company;
+  for (const n of [noCity, noCity.replace(/\b(co|company)\.?\s*$/i, " ")]) {
+    const clean = n.replace(/[\s,-]+$/, "").replace(/\s+/g, " ").trim();
+    if (clean.length >= 3 && !out.includes(clean)) out.push(clean);
+  }
+  return out;
+}
+
+/**
+ * Leads that couldn't be confirmed as a Ltd/LLP when they were found get re-checked automatically,
+ * at most once every 3 days each. Once confirmed, autoApproveReady schedules them on the same run.
+ */
+export async function recheckPecr(limit = 5) {
+  const leads = must(
+    await db()
+      .from("leads")
+      .select("id,company,website,source_ref,city,email")
+      .eq("pecr_ok", false)
+      .eq("entity_type", "unknown")
+      .in("status", ["enriched", "audited", "ready"])
+      .order("created_at")
+      .limit(50),
+  ) as (Pick<Lead, "id" | "company" | "website" | "source_ref" | "city" | "email">)[];
+  if (!leads.length) return 0;
+  const since = new Date(Date.now() - 3 * 86400_000).toISOString();
+  const recent = new Set(
+    (must(await db().from("events").select("lead_id").eq("type", "pecr_checked").gte("created_at", since).in("lead_id", leads.map((l) => l.id))) as { lead_id: string }[]).map(
+      (e) => e.lead_id,
+    ),
+  );
+  let confirmed = 0;
+  for (const lead of leads.filter((l) => !recent.has(l.id)).slice(0, limit)) {
+    const email = lead.email && !FREE_MAIL.test(lead.email.split("@")[1] ?? "") ? lead.email : null;
+    const patch = await resolveEntity({ ...lead, email }).catch(() => ({}) as Record<string, unknown>);
+    if (Object.keys(patch).length) await setLead(lead.id, patch);
+    if (patch.pecr_ok) confirmed++;
+    await db().from("events").insert({ lead_id: lead.id, type: "pecr_checked", meta: { confirmed: !!patch.pecr_ok } });
+  }
+  return confirmed;
 }
 
 // ---------- 2. enrich ----------
@@ -666,6 +723,7 @@ export async function tick() {
   await step("enriched", () => enrichLeads());
   await step("audited", () => auditLeads());
   await step("written", () => writeEmails());
+  await step("pecrRechecked", () => recheckPecr());
   await step("autoApproved", () => autoApproveReady());
   result.ms = Date.now() - started;
   return result;

@@ -74,7 +74,8 @@ export async function siteLegalText(website: string): Promise<string> {
     /* keep the raw value */
   }
   const parts: string[] = [];
-  for (const p of ["", "/privacy-policy", "/contact-us"]) {
+  // UK companies must print their number somewhere: usually the footer, else a legal or about page.
+  for (const p of ["", "/privacy-policy", "/privacy", "/terms", "/terms-and-conditions", "/contact-us", "/contact", "/about-us", "/about"]) {
     const r = await fetchText(origin + p, { timeoutMs: 8000, maxBytes: 1_500_000 });
     if (!r.ok) continue;
     parts.push(r.text.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&"));

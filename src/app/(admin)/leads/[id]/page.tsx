@@ -31,6 +31,7 @@ import { friendlyError } from "@/lib/errors";
 import { displayScore } from "@/lib/audit/analyze";
 import { askedForReport, reportEmail, reportMailbox } from "@/lib/inbound";
 import type { AuditCheck, Lead, Message } from "@/lib/types";
+import { LeadNowStrip, LeadStatusButton, LeadStatusWindow } from "./LeadProgress";
 
 const PROMPT_SOURCE = { website: "from their website", campaign: "campaign", fallback: "generic (couldn't read site)", default: "generic" } as const;
 const IMPACT_ORDER = { high: 0, medium: 1, low: 2 } as const;
@@ -88,7 +89,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const { id } = await params;
   const { msg } = await searchParams;
   // One parallel round trip: the lead, its messages, its events and the sending mailbox.
-  const [lead, messages, events, box] = await Promise.all([
+  const [lead, messages, events, box, views] = await Promise.all([
     db()
       .from("leads")
       .select("*")
@@ -109,6 +110,12 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
       .limit(20)
       .then((r) => must(r) as { type: string; created_at: string }[]),
     reportMailbox(),
+    db()
+      .from("events")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", id)
+      .eq("type", "page_view")
+      .then((r) => r.count ?? 0),
   ]);
   if (!lead) notFound();
   const editable = messages.filter((m) => m.direction === "out" && ["draft", "scheduled"].includes(m.status));
@@ -134,6 +141,59 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const perf = audit?.performance;
   const timeline = groupEvents(events);
   const initial = (lead.company || "?").trim().charAt(0).toUpperCase();
+  const progress = { lead, messages, views, reportSent };
+
+  // A cold lead with a written sequence: show the sequence first, the one-off report email after it.
+  const seqFirst = cold && editable.length > 0;
+  const reportPanel = report && (
+    <form id="send-report" action={sendReportAction} className="card ld-panel send-report">
+      <input type="hidden" name="id" value={lead.id} />
+      <div className="ld-panel-head">
+        <span className="dash-chip sm orange">
+          <Send size={16} aria-hidden="true" />
+        </span>
+        <div className="ld-panel-title">
+          <h2>Report email</h2>
+          {fromBox ? (
+            <span>
+              From <b>{fromBox.from_name}</b> &lt;{fromBox.email}&gt;
+            </span>
+          ) : (
+            <span className="row-error">No active mailbox. Add one under Mailboxes before sending.</span>
+          )}
+        </div>
+        {reportSent ? <span className="pill good">sent before</span> : <span className="pill warn">not sent yet</span>}
+      </div>
+      {cold && !contacted && (editable.length > 0 || lead.status === "audited") && (
+        <p className="small muted report-note">
+          Sending this report counts as the first email: any unsent sequence emails for this lead are cancelled.
+        </p>
+      )}
+      {cold && !lead.pecr_ok && <p className="small row-error report-note">Confirm the PECR check above before sending to a cold lead.</p>}
+      <div className="ld-fields">
+        <div>
+          <label>To</label>
+          <input name="to" type="email" required defaultValue={lead.email ?? ""} />
+        </div>
+        <div>
+          <label>Subject</label>
+          <input name="subject" required defaultValue={report.subject} />
+        </div>
+      </div>
+      <label>Message</label>
+      <textarea name="body" required className="ld-body" style={{ minHeight: 260 }} defaultValue={report.text} />
+      <div className="form-foot ld-foot">
+        <a href={`/p/${lead.slug}`} target="_blank" rel="noreferrer" className="small icon-link">
+          Preview the report page
+          <ExternalLink size={13} aria-hidden="true" />
+        </a>
+        <SubmitButton pending="Sending...">
+          <Send size={15} aria-hidden="true" />
+          {reportSent ? "Send again" : "Send email"}
+        </SubmitButton>
+      </div>
+    </form>
+  );
 
   return (
     <>
@@ -174,37 +234,45 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </div>
           </div>
         </div>
-        <div className="head-actions">
-          {audit && (
-            <a href={`/p/${lead.slug}`} target="_blank" rel="noreferrer" className="btn-link btn-outline">
-              <ExternalLink size={15} aria-hidden="true" />
-              Audit page
-            </a>
-          )}
-          {audit && lead.website && (
-            <form action={auditLeadNow}>
+        <div className="ld-actions">
+          {/* Row 1: where the lead is and the main action. Row 2: everything else. */}
+          <div className="head-actions">
+            <LeadStatusButton {...progress} />
+            {lead.status === "ready" && (
+              <form action={approveOne}>
+                <input type="hidden" name="id" value={lead.id} />
+                <SubmitButton pending="Scheduling...">Approve and schedule</SubmitButton>
+              </form>
+            )}
+          </div>
+          <div className="head-actions">
+            {audit && (
+              <a href={`/p/${lead.slug}`} target="_blank" rel="noreferrer" className="btn-link btn-outline">
+                <ExternalLink size={15} aria-hidden="true" />
+                Audit page
+              </a>
+            )}
+            {audit && lead.website && (
+              <form action={auditLeadNow}>
+                <input type="hidden" name="id" value={lead.id} />
+                <SubmitButton className="secondary" pending="Re-auditing (up to 2 min)...">
+                  <RotateCcw size={15} aria-hidden="true" />
+                  Re-run audit
+                </SubmitButton>
+              </form>
+            )}
+            <form action={meetingBooked}>
               <input type="hidden" name="id" value={lead.id} />
-              <SubmitButton className="secondary" pending="Re-auditing (up to 2 min)...">
-                <RotateCcw size={15} aria-hidden="true" />
-                Re-run audit
+              <SubmitButton className="secondary" pending="Saving...">
+                Mark meeting booked
               </SubmitButton>
             </form>
-          )}
-          <form action={meetingBooked}>
-            <input type="hidden" name="id" value={lead.id} />
-            <SubmitButton className="secondary" pending="Saving...">
-              Mark meeting booked
-            </SubmitButton>
-          </form>
-          {lead.status === "ready" && (
-            <form action={approveOne}>
-              <input type="hidden" name="id" value={lead.id} />
-              <SubmitButton pending="Scheduling...">Approve and schedule</SubmitButton>
-            </form>
-          )}
+          </div>
         </div>
       </header>
       <Flash msg={msg} />
+      <LeadNowStrip {...progress} />
+      <LeadStatusWindow {...progress} />
 
       {lead.last_error && (
         <div className="card callout bad">
@@ -225,11 +293,12 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           <input type="hidden" name="id" value={lead.id} />
           <b className="icon-title">
             <ShieldAlert size={16} aria-hidden="true" />
-            PECR check needed before sending
+            On hold automatically: not confirmed as a limited company or LLP yet
           </b>
           <p className="small">
-            Unsolicited marketing email in the UK is only allowed to corporate subscribers (limited companies, LLPs, PLCs) unless they have consented.
-            Sole traders and partnerships need consent. Confirm only if you have checked Companies House.
+            UK rules (PECR) only allow cold marketing email to limited companies, PLCs and LLPs. The system checks Companies House and the
+            company number on their website by itself, re-checks every 3 days, and schedules the emails automatically once it&apos;s confirmed.
+            You don&apos;t need to do anything. Only use the button below if you&apos;ve looked it up yourself and know it&apos;s a company.
           </p>
           <div className="inline-form">
             <select name="entity_type" defaultValue="company">
@@ -288,55 +357,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </section>
           )}
 
-          {report && (
-            <form id="send-report" action={sendReportAction} className="card ld-panel send-report">
-              <input type="hidden" name="id" value={lead.id} />
-              <div className="ld-panel-head">
-                <span className="dash-chip sm orange">
-                  <Send size={16} aria-hidden="true" />
-                </span>
-                <div className="ld-panel-title">
-                  <h2>Report email</h2>
-                  {fromBox ? (
-                    <span>
-                      From <b>{fromBox.from_name}</b> &lt;{fromBox.email}&gt;
-                    </span>
-                  ) : (
-                    <span className="row-error">No active mailbox. Add one under Mailboxes before sending.</span>
-                  )}
-                </div>
-                {reportSent ? <span className="pill good">sent before</span> : <span className="pill warn">not sent yet</span>}
-              </div>
-              {cold && !contacted && (editable.length > 0 || lead.status === "audited") && (
-                <p className="small muted report-note">
-                  Sending this report counts as the first email: any unsent sequence emails for this lead are cancelled.
-                </p>
-              )}
-              {cold && !lead.pecr_ok && <p className="small row-error report-note">Confirm the PECR check above before sending to a cold lead.</p>}
-              <div className="ld-fields">
-                <div>
-                  <label>To</label>
-                  <input name="to" type="email" required defaultValue={lead.email ?? ""} />
-                </div>
-                <div>
-                  <label>Subject</label>
-                  <input name="subject" required defaultValue={report.subject} />
-                </div>
-              </div>
-              <label>Message</label>
-              <textarea name="body" required className="ld-body" style={{ minHeight: 260 }} defaultValue={report.text} />
-              <div className="form-foot ld-foot">
-                <a href={`/p/${lead.slug}`} target="_blank" rel="noreferrer" className="small icon-link">
-                  Preview the report page
-                  <ExternalLink size={13} aria-hidden="true" />
-                </a>
-                <SubmitButton pending="Sending...">
-                  <Send size={15} aria-hidden="true" />
-                  {reportSent ? "Send again" : "Send email"}
-                </SubmitButton>
-              </div>
-            </form>
-          )}
+          {!seqFirst && reportPanel}
 
           {editable.length > 0 && (
             <section className="card ld-panel">
@@ -381,6 +402,8 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               </ol>
             </section>
           )}
+
+          {seqFirst && reportPanel}
 
           {/* Only your own sent emails so far: a compact, collapsed list instead of a full chat. */}
           {history.length > 0 && !hasReplies && (
