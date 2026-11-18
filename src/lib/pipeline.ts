@@ -363,7 +363,7 @@ async function activeMailboxes(): Promise<(Mailbox & { sentToday: number })[]> {
   return out;
 }
 
-export async function sendDue(maxPerMailboxPerRun = 2) {
+export async function sendDue(maxPerMailboxPerRun = 6) {
   const due = must(
     await db()
       .from("messages")
