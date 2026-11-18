@@ -6,6 +6,7 @@ import { displayScore, groupChecks, HIGH_ISSUE_CEILING } from "@/lib/audit/analy
 import { brand } from "@/lib/brand";
 import { db } from "@/lib/db";
 import type { AeoAudit, Audit, AuditCheck, Lead } from "@/lib/types";
+import { messageIdFrom } from "@/lib/tracking";
 import { PrintButton } from "./PrintButton";
 import s from "./p.module.css";
 
@@ -297,8 +298,9 @@ const FIX: Record<string, string> = {
   og_tags: "set a title and picture for link previews.",
 };
 
-export default async function AuditPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function AuditPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ m?: string }> }) {
   const { slug } = await params;
+  const fromEmail = messageIdFrom((await searchParams).m);
   const { data: lead } = await db().from("leads").select("*").eq("slug", slug).maybeSingle<Lead>();
   if (!lead) notFound();
   const { data: campaign } = lead.campaign_id
@@ -307,7 +309,7 @@ export default async function AuditPage({ params }: { params: Promise<{ slug: st
 
   const h = await headers();
   const ua = h.get("user-agent") ?? "";
-  if (!BOT.test(ua)) await db().from("events").insert({ lead_id: lead.id, type: "page_view", meta: { ua: ua.slice(0, 200) } });
+  if (!BOT.test(ua)) await db().from("events").insert({ lead_id: lead.id, type: "page_view", meta: { ua: ua.slice(0, 200), ...(fromEmail ? { message_id: fromEmail } : {}) } });
 
   const a: Audit | null = lead.audit;
   const hi = lead.first_name ? `Hi ${lead.first_name}. ` : "";

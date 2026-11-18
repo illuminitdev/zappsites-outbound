@@ -71,6 +71,12 @@ async function loadCurrentUser(id: string | null): Promise<string | null> {
   return data?.username ?? null;
 }
 
+/** Sidebar links with the number of replies waiting next to Inbox. Streamed in like the bell. */
+async function NavLinksWithCounts() {
+  const { count, error } = await db().from("messages").select("id", { count: "exact", head: true }).eq("direction", "in").eq("handled", false);
+  return <NavLinks counts={{ "/inbox": error ? 0 : (count ?? 0) }} />;
+}
+
 /** Bell with live counts. Streamed in, so pages never wait for these queries. */
 async function TopbarWithNotifications() {
   const userId = await currentUserId();
@@ -104,7 +110,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/zappsites-outbound-logo.png" alt="ZappSites Outbound" />
         </a>
-        <NavLinks />
+        <Suspense fallback={<NavLinks />}>
+          <NavLinksWithCounts />
+        </Suspense>
         <form action={logout} className="nav-logout">
           <Suspense fallback={null}>
             <NavUser />

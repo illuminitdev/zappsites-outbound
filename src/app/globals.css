@@ -1151,3 +1151,17 @@ img, svg, video { max-width: 100%; }
 .ld-actions .head-actions { justify-content: flex-end; }
 .ld-actions .head-actions form, .ld-actions .head-actions button { margin: 0; }
 @media (max-width: 900px) { .ld-actions { align-items: flex-start; width: 100%; } .ld-actions .head-actions { justify-content: flex-start; } }
+
+/* Sidebar badge: replies waiting next to Inbox */
+.nav-count { margin-left: auto; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; display: inline-grid; place-items: center; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; line-height: 1; }
+
+/* ---- Per-email tracking chips (lead page) ---- */
+.et-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.et-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--bg); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+.et-chip em { font-style: normal; font-weight: 500; opacity: .8; }
+.et-chip.good { background: #e7f6ef; color: var(--good); border-color: #bfe3d1; }
+.et-chip.hot { background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-line); }
+.ld-sent summary .et-chips { flex-basis: 100%; padding-left: 25px; margin: 2px 0 0; }
+.et-summary { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); }
+.et-summary span { display: inline-flex; align-items: center; gap: 5px; }
+.et-summary .hot { color: var(--accent-text); font-weight: 650; }

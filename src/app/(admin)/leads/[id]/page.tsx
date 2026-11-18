@@ -31,6 +31,7 @@ import { friendlyError } from "@/lib/errors";
 import { displayScore } from "@/lib/audit/analyze";
 import { askedForReport, reportEmail, reportMailbox } from "@/lib/inbound";
 import type { AuditCheck, Lead, Message } from "@/lib/types";
+import { EmailTrackChips, TrackingSummary, statsByEmail, type TrackEvent } from "./EmailTracking";
 import { LeadNowStrip, LeadStatusButton, LeadStatusWindow } from "./LeadProgress";
 
 const PROMPT_SOURCE = { website: "from their website", campaign: "campaign", fallback: "generic (couldn't read site)", default: "generic" } as const;
@@ -89,7 +90,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const { id } = await params;
   const { msg } = await searchParams;
   // One parallel round trip: the lead, its messages, its events and the sending mailbox.
-  const [lead, messages, events, box, views] = await Promise.all([
+  const [lead, messages, events, box, views, tracking] = await Promise.all([
     db()
       .from("leads")
       .select("*")
@@ -116,6 +117,13 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
       .eq("lead_id", id)
       .eq("type", "page_view")
       .then((r) => r.count ?? 0),
+    // Per-email tracking: sent markers, opens, report views and booking clicks (each carries meta.message_id).
+    db()
+      .from("events")
+      .select("type,created_at,meta")
+      .eq("lead_id", id)
+      .in("type", ["email_sent", "email_open", "page_view", "booking_click"])
+      .then((r) => (r.error ? [] : (r.data as TrackEvent[]))),
   ]);
   if (!lead) notFound();
   const editable = messages.filter((m) => m.direction === "out" && ["draft", "scheduled"].includes(m.status));
@@ -141,7 +149,11 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const perf = audit?.performance;
   const timeline = groupEvents(events);
   const initial = (lead.company || "?").trim().charAt(0).toUpperCase();
-  const progress = { lead, messages, views, reportSent };
+  const emailStats = statsByEmail(tracking);
+  const sentOut = history.filter((m) => m.direction === "out" && m.status === "sent");
+  const opens = [...emailStats.values()].filter((s) => s.opens || s.views || s.clicks).length;
+  const clicks = tracking.filter((e) => e.type === "booking_click").length;
+  const progress = { lead, messages, views, reportSent, opens, clicks };
 
   // A cold lead with a written sequence: show the sequence first, the one-off report email after it.
   const seqFirst = cold && editable.length > 0;
@@ -274,7 +286,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
       <LeadNowStrip {...progress} />
       <LeadStatusWindow {...progress} />
 
-      {lead.last_error && (
+      {lead.last_error && lead.last_error !== "writing" && (
         <div className="card callout bad">
           <b className="icon-title">
             <TriangleAlert size={16} aria-hidden="true" />
@@ -416,6 +428,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                   <h2>Sent emails</h2>
                   <span>No reply yet</span>
                 </div>
+                <TrackingSummary stats={emailStats} sentCount={sentOut.length} />
               </div>
               <ul className="ld-sent">
                 {history.map((m) => (
@@ -426,6 +439,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                         <b>{m.subject ?? "(no subject)"}</b>
                         <span className="muted small">{fmt(m.sent_at ?? m.created_at)}</span>
                         <Pill v={m.status} />
+                        {m.status === "sent" && <EmailTrackChips s={emailStats.get(m.id)} />}
                       </summary>
                       <pre>{m.body_text}</pre>
                     </details>
@@ -463,6 +477,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                           <Pill v={m.classification ?? m.status} />
                         </div>
                         {m.subject && <div className="bubble-subject">{m.subject}</div>}
+                        {out && m.status === "sent" && <EmailTrackChips s={emailStats.get(m.id)} />}
                         <pre>{m.body_text}</pre>
                       </div>
                     </div>

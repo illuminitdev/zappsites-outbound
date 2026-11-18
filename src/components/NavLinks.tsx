@@ -24,8 +24,9 @@ const LINKS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-/** Sidebar links; the current section is highlighted (sub-pages like /leads/123 count as Leads). */
-export function NavLinks() {
+/** Sidebar links; the current section is highlighted (sub-pages like /leads/123 count as Leads).
+ *  `counts` puts a small number badge after a link, e.g. { "/inbox": 2 } for replies waiting. */
+export function NavLinks({ counts = {} }: { counts?: Record<string, number> }) {
   const path = usePathname();
   const isActive = (href: string) => (href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`));
   return (
@@ -36,6 +37,11 @@ export function NavLinks() {
           <Link key={href} href={href} prefetch className={active ? "active" : undefined} aria-current={active ? "page" : undefined}>
             <Icon size={18} strokeWidth={2} aria-hidden="true" />
             {label}
+            {counts[href] ? (
+              <span className="nav-count" aria-label={`${counts[href]} waiting`}>
+                {counts[href] > 99 ? "99+" : counts[href]}
+              </span>
+            ) : null}
           </Link>
         );
       })}

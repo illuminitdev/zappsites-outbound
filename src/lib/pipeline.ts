@@ -13,6 +13,8 @@ import { fetchNewMail, stripQuoted } from "./mail/inbox";
 import { sendMail } from "./mail/send";
 import { jitterFor, planSequence } from "./sequence/schedule";
 import { renderEmail, threadSubject } from "./sequence/render";
+import { pixelUrl, textToHtml, trackedUrl } from "./tracking";
+import { writeTemplateSequence } from "./sequence/template";
 import type { Campaign, Lead, Mailbox, Message } from "./types";
 
 const log = (...a: unknown[]) => console.log("[outbound]", ...a);
@@ -318,6 +320,12 @@ export async function defaultCampaignId(): Promise<string> {
   return created.id;
 }
 
+/** Case-insensitive exact match for ilike: "_" and "%" in an address are literal, not wildcards. */
+const likeExact = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/** Marker on a lead while a run is writing its emails (see writeEmails). */
+const WRITING = "writing";
+
 export async function writeEmails(limit = 5) {
   const leads = must(await db().from("leads").select("*").eq("status", "audited").order("created_at").limit(limit)) as Lead[];
   let fallback: string | null = null;
@@ -329,8 +337,20 @@ export async function writeEmails(limit = 5) {
     }
     const campaign = await getCampaign(lead.campaign_id);
     if (!campaign?.active) continue;
+    // Claim the lead first, so two overlapping runs can't both write (and later send) a sequence for it.
+    const claimed = must(
+      await db().from("leads").update({ last_error: WRITING }).eq("id", lead.id).eq("status", "audited").or(`last_error.is.null,last_error.neq.${WRITING}`).select("id"),
+    ) as { id: string }[];
+    if (!claimed.length) continue;
+    // Already has emails (e.g. written by an earlier run that didn't finish updating the lead): don't write again.
+    const existing = must(await db().from("messages").select("id").eq("lead_id", lead.id).eq("direction", "out").neq("status", "cancelled").limit(1)) as unknown[];
+    if (existing.length) {
+      await setLead(lead.id, { status: "ready", last_error: null });
+      continue;
+    }
     try {
-      const { emails, pageNote } = await writeSequence(campaign, lead);
+      // Templates by default (no AI cost); EMAIL_WRITER=ai uses Claude to write each email instead.
+      const { emails, pageNote } = process.env.EMAIL_WRITER === "ai" ? await writeSequence(campaign, lead) : writeTemplateSequence(campaign, lead);
       const rows = emails.map((e, i) => ({
         lead_id: lead.id,
         campaign_id: campaign.id,
@@ -341,7 +361,7 @@ export async function writeEmails(limit = 5) {
         status: "draft",
       }));
       must(await db().from("messages").insert(rows));
-      await setLead(lead.id, { status: "ready", audit_note: pageNote || null });
+      await setLead(lead.id, { status: "ready", audit_note: pageNote || null, last_error: null });
       if (campaign.auto_approve && lead.pecr_ok) await approveLeads([lead.id]);
     } catch (e) {
       await setLead(lead.id, { status: "error", last_error: `Write: ${(e as Error).message}` });
@@ -378,6 +398,15 @@ export async function approveLeads(leadIds: string[]): Promise<{ scheduled: numb
     }
     if (!lead.email || (await isSuppressed(lead.email))) {
       blocked.push(`${lead.company}: no email or suppressed`);
+      continue;
+    }
+    // The same address imported twice (two leads): only the first one gets a sequence.
+    const twin = must(
+      await db().from("leads").select("id,company").ilike("email", likeExact(lead.email)).neq("id", lead.id).not("status", "in", "(new,enriched,audited,ready,error)").limit(1),
+    ) as { id: string; company: string }[];
+    if (twin.length) {
+      await setLead(id, { status: "error", last_error: `Duplicate: ${lead.email} is already being contacted as another lead (${twin[0].company}).` });
+      blocked.push(`${lead.company}: same email as another lead already being contacted`);
       continue;
     }
     const campaign = await getCampaign(lead.campaign_id);
@@ -442,12 +471,21 @@ export async function sendDue(maxPerMailboxPerRun = 6) {
       must(await db().from("messages").update({ status: "cancelled" }).eq("id", m.id));
       continue;
     }
-    // Earlier steps must have gone first (keeps threads in order).
+    // Earlier steps must have gone first (keeps threads in order). Cancelled copies don't count either way.
     if ((m.step ?? 0) > 0) {
       const prev = must(
         await db().from("messages").select("id,status,message_id,mailbox_id,step").eq("lead_id", lead.id).eq("direction", "out").lt("step", m.step!),
       ) as Pick<Message, "id" | "status" | "message_id" | "mailbox_id" | "step">[];
-      if (prev.some((p) => p.status !== "sent" && p.status !== "failed")) continue;
+      if (prev.some((p) => ["draft", "scheduled", "sending"].includes(p.status))) continue;
+      if (!prev.some((p) => p.status === "sent")) continue;
+    }
+    // Never send the same step twice to one address (duplicate rows, or the same email on two leads).
+    const already = must(
+      await db().from("messages").select("id,leads!inner(email)").eq("direction", "out").eq("step", m.step ?? 0).in("status", ["sent", "sending"]).neq("id", m.id).ilike("leads.email", likeExact(lead.email)),
+    ) as unknown[];
+    if (already.length) {
+      must(await db().from("messages").update({ status: "cancelled", error: "Duplicate: this step was already sent to this address" }).eq("id", m.id).eq("status", "scheduled"));
+      continue;
     }
     const thread = must(
       await db().from("messages").select("message_id,mailbox_id").eq("lead_id", lead.id).eq("direction", "out").eq("status", "sent").order("step"),
@@ -461,12 +499,16 @@ export async function sendDue(maxPerMailboxPerRun = 6) {
       ? boxes.find((b) => b.id === sticky && capacity(b))
       : boxes.filter(capacity).sort((a, b) => a.sentToday - b.sentToday)[0];
     if (!box) continue;
+    // Claim the email before sending, so an overlapping run can't send it too.
+    const claimed = must(await db().from("messages").update({ status: "sending" }).eq("id", m.id).eq("status", "scheduled").select("id")) as unknown[];
+    if (!claimed.length) continue;
 
     const campaign = await getCampaign(m.campaign_id);
     const text = renderEmail({
       body: m.body_text ?? "",
-      auditUrl: auditUrl(lead),
-      bookingUrl: bookingUrl(lead),
+      // The email's own id on its links, so a report view or booking click is credited to this email.
+      auditUrl: trackedUrl(auditUrl(lead), m.id),
+      bookingUrl: trackedUrl(bookingUrl(lead), m.id),
       signature: campaign?.signature || defaultSignature(),
       unsubscribeUrl: unsubscribeUrl(lead),
       identity: brand.identityLine,
@@ -477,6 +519,7 @@ export async function sendDue(maxPerMailboxPerRun = 6) {
         to: lead.email,
         subject: m.subject ?? "",
         text,
+        html: textToHtml(text, pixelUrl(m.id)),
         inReplyTo: refs.at(-1) ?? null,
         references: refs,
         unsubscribeUrl: `${env.appUrl}/api/public/unsubscribe/${lead.slug}`, // RFC 8058 one-click target
@@ -487,6 +530,8 @@ export async function sendDue(maxPerMailboxPerRun = 6) {
           .update({ status: "sent", sent_at: new Date().toISOString(), mailbox_id: box.id, message_id: messageId, body_text: text })
           .eq("id", m.id),
       );
+      // Marks this email as tracked (emails sent before tracking existed have no opens to show).
+      await db().from("events").insert({ lead_id: lead.id, type: "email_sent", meta: { message_id: m.id, step: m.step } });
       box.sentToday++;
       usedThisRun.set(box.id, (usedThisRun.get(box.id) ?? 0) + 1);
       sent++;
@@ -533,6 +578,7 @@ export async function pollInboxes() {
         if (l[0]) ({ id: leadId, campaign_id: campaignId } = l[0]);
       }
       if (!leadId) continue; // not a reply to outbound
+      const auto = !mail.isBounce && isAutoReply(mail.subject, mail.text);
       must(
         await db().from("messages").insert({
           lead_id: leadId,
@@ -545,19 +591,62 @@ export async function pollInboxes() {
           in_reply_to: mail.inReplyTo,
           status: "received",
           received_at: mail.date.toISOString(),
-          classification: mail.isBounce ? "bounce" : null,
+          // Auto-replies ("we've received your email", out of office) are recognised here, without the AI,
+          // and don't need answering; the sequence carries on.
+          classification: mail.isBounce ? "bounce" : auto ? "out_of_office" : null,
+          handled: auto ? true : undefined,
         }),
       );
       if (mail.isBounce) {
         await cancelPending(leadId);
         await setLead(leadId, { status: "bounced" });
         if (mail.bouncedRecipient) await suppress(mail.bouncedRecipient, "email", "bounced");
+      } else if (!auto) {
+        await alertNewReply(box, leadId, mail.subject, stripQuoted(mail.text)).catch((e) => log("reply alert failed", (e as Error).message));
       }
       stored++;
     }
     if (maxUid !== box.imap_last_uid) must(await db().from("mailboxes").update({ imap_last_uid: maxUid }).eq("id", box.id));
   }
   return stored;
+}
+
+/** Automatic acknowledgements and out-of-office replies, recognised from the subject and opening lines. */
+export function isAutoReply(subject: string | null | undefined, body: string | null | undefined): boolean {
+  const s = (subject ?? "").trim();
+  if (/^(automatic reply|automated reply|auto[- ]?reply|autoreply|auto:|out of (the )?office|ooo\b|away from the office|on annual leave)/i.test(s)) return true;
+  const head = (body ?? "").slice(0, 600).toLowerCase();
+  return [
+    "this is an automated",
+    "this is an automatic",
+    "automated response",
+    "automatic reply",
+    "your email has been delivered successfully",
+    "please do not reply to this email",
+    "i am currently out of the office",
+    "i'm currently out of the office",
+    "i am out of the office",
+  ].some((p) => head.includes(p));
+}
+
+/** Email the team when a real reply lands (REPLY_NOTIFY_EMAIL, else REPORT_TO). */
+async function alertNewReply(box: Mailbox, leadId: string, subject: string | null, text: string) {
+  const to = process.env.REPLY_NOTIFY_EMAIL || env.reportTo();
+  if (!to) return;
+  const lead = must(await db().from("leads").select("company,email,first_name").eq("id", leadId).single()) as Pick<Lead, "company" | "email" | "first_name">;
+  await sendMail(box, {
+    to,
+    replyTo: lead.email ?? undefined,
+    subject: `New reply: ${lead.company}${subject ? ` (${subject.replace(/^(re:\s*)+/i, "")})` : ""}`,
+    text: [
+      `${lead.first_name ?? lead.company}${lead.email ? ` <${lead.email}>` : ""} replied:`,
+      "",
+      text.trim().slice(0, 2000),
+      "",
+      `Answer it in the inbox: ${env.appUrl}/inbox`,
+      `Lead: ${env.appUrl}/leads/${leadId}`,
+    ].join("\n"),
+  });
 }
 
 // ---------- 8. triage replies ----------
@@ -567,6 +656,11 @@ export async function triageReplies(limit = 10) {
     await db().from("messages").select("*").eq("direction", "in").is("classification", null).order("received_at").limit(limit),
   ) as Message[];
   for (const msg of inbound) {
+    // Auto-replies need no AI and no answer, and don't stop the sequence.
+    if (isAutoReply(msg.subject, msg.body_text)) {
+      must(await db().from("messages").update({ classification: "out_of_office", handled: true }).eq("id", msg.id));
+      continue;
+    }
     const lead = must(await db().from("leads").select("*").eq("id", msg.lead_id).single()) as Lead;
     const campaign = await getCampaign(lead.campaign_id);
     const last = must(

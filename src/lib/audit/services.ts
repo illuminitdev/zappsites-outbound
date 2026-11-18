@@ -114,7 +114,8 @@ export async function profileBusiness(p: {
     }
   }
 
-  if (!text.trim()) {
+  // No website text, or Claude switched off (AEO_CLAUDE=false): questions from the campaign's category instead.
+  if (!text.trim() || process.env.AEO_CLAUDE === "false") {
     if (!p.category) return null;
     return { category: p.category, services: [], area: p.city, prompts: templatePrompts({ services: [], category: p.category, city: p.city }, p.max), source: "fallback" };
   }

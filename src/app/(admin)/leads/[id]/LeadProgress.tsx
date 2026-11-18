@@ -1,4 +1,4 @@
-import { Ban, CalendarCheck, Check, ClipboardCheck, Eye, Mail, MessagesSquare, PenLine, Send, ShieldCheck, UserSearch, X } from "lucide-react";
+import { Ban, CalendarCheck, Check, ClipboardCheck, Eye, Mail, MailOpen, MessagesSquare, MousePointerClick, PenLine, Send, ShieldCheck, UserSearch, X } from "lucide-react";
 import { fmt } from "@/components/ui";
 import { displayScore } from "@/lib/audit/analyze";
 import type { Lead, Message } from "@/lib/types";
@@ -26,10 +26,14 @@ export interface ProgressProps {
   messages: Message[];
   views: number;
   reportSent: boolean;
+  /** Sent emails opened (tracking image, or a report view / booking click from the email). */
+  opens: number;
+  /** "Book a call" link clicks. */
+  clicks: number;
 }
 
 /** Where this lead is in the pipeline, step by step, with what happens next. */
-function progressOf({ lead, messages, views, reportSent }: ProgressProps) {
+function progressOf({ lead, messages, views, reportSent, opens, clicks }: ProgressProps) {
   const audit = lead.audit;
   const out = messages.filter((m) => m.direction === "out" && m.status !== "cancelled").sort((a, b) => (a.step ?? 0) - (b.step ?? 0));
   const sent = out.filter((m) => m.status === "sent");
@@ -121,11 +125,31 @@ function progressOf({ lead, messages, views, reportSent }: ProgressProps) {
       icon: <Send size={15} />,
     },
     {
+      key: "opened",
+      label: "Opened email",
+      state: opens || views || clicks ? "done" : anySent ? "now" : "todo",
+      detail: opens
+        ? `${n(opens, "email")} opened`
+        : views || clicks
+          ? "Opened (they used a link in it)"
+          : anySent
+            ? "Not opened yet"
+            : "After the first email",
+      icon: <MailOpen size={15} />,
+    },
+    {
       key: "viewed",
       label: "Opened audit page",
       state: views ? "done" : anySent ? "now" : "todo",
       detail: views ? `Viewed ${n(views, "time")}` : anySent ? "Not opened yet" : "After the first email",
       icon: <Eye size={15} />,
+    },
+    {
+      key: "clicked",
+      label: "Clicked Book a call",
+      state: clicks ? "done" : anySent ? "now" : "todo",
+      detail: clicks ? `Clicked ${n(clicks, "time")}` : anySent ? "Not clicked yet" : "After the first email",
+      icon: <MousePointerClick size={15} />,
     },
     {
       key: "replied",

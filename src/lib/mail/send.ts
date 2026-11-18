@@ -6,6 +6,8 @@ export interface OutboundMail {
   to: string;
   subject: string;
   text: string;
+  /** Optional HTML version of the same message (sequence emails: clickable links plus an open-tracking image). */
+  html?: string;
   inReplyTo?: string | null;
   references?: string[];
   unsubscribeUrl?: string;
@@ -37,6 +39,7 @@ export async function sendMail(mailbox: Mailbox, mail: OutboundMail): Promise<st
     to: mail.to,
     subject: mail.subject,
     text: mail.text,
+    html: mail.html,
     messageId,
     inReplyTo: mail.inReplyTo ?? undefined,
     references: mail.references?.length ? mail.references : undefined,
