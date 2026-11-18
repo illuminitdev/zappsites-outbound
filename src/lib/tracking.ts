@@ -7,8 +7,30 @@ import { env } from "./env";
 /** Requests from link scanners and previewers, not people. */
 export const BOT_UA = /bot|crawler|spider|preview|scanner|safelinks|proofpoint|mimecast|barracuda|headless|curl|wget|python|go-http/i;
 
-/** Opens this soon after sending are mail-server scanners, not the recipient. */
-export const SCANNER_GRACE_MS = 20_000;
+/**
+ * Opens, report views and booking clicks this soon after an email is sent are mail-security scanners
+ * (Safe Links, Mimecast...) checking every link, not the recipient. Seen in practice: 5-55 seconds,
+ * with a normal browser user agent, so the user-agent check alone doesn't catch them.
+ */
+export const SCANNER_GRACE_MS = 120_000;
+
+/** True when an event happened within the scanner window after one of these send times. */
+export function isScannerHit(eventAt: string, sentAts: (string | null)[]): boolean {
+  const t = new Date(eventAt).getTime();
+  return sentAts.some((s) => {
+    if (!s) return false;
+    const d = t - new Date(s).getTime();
+    return d >= 0 && d < SCANNER_GRACE_MS;
+  });
+}
+
+/** Was an email sent to this lead in the last couple of minutes? (Then a visit now is probably a scanner.) */
+export async function justEmailed(leadId: string): Promise<boolean> {
+  const { db } = await import("./db");
+  const since = new Date(Date.now() - SCANNER_GRACE_MS).toISOString();
+  const { data } = await db().from("messages").select("id").eq("lead_id", leadId).eq("direction", "out").eq("status", "sent").gte("sent_at", since).limit(1);
+  return !!data?.length;
+}
 
 export const pixelUrl = (messageId: string) => `${env.appUrl}/api/public/o/${messageId}`;
 

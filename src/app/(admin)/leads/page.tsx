@@ -26,7 +26,7 @@ import {
 import { approveSelected, createManualAudit, importCompaniesHouse, importCsv, importPlaces } from "@/app/actions";
 import { ModalButton } from "@/components/Modal";
 import { CsvDrop } from "@/components/CsvDrop";
-import { StatusFilter } from "@/components/StatusFilter";
+import { FilterMenu } from "@/components/StatusFilter";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, Flash, Pill, Score } from "@/components/ui";
 import { db, must } from "@/lib/db";
@@ -34,6 +34,7 @@ import { friendlyError } from "@/lib/errors";
 import { leadStatusCounts } from "@/lib/stats";
 import { TRADES } from "@/lib/inbound";
 import type { Lead } from "@/lib/types";
+import { EmailStatusCell, emailStatuses, type LeadEmailStatus } from "./emailStatus";
 
 // "Send audit" runs the audit inside the server action, which can take a minute or two.
 export const maxDuration = 300;
@@ -50,18 +51,58 @@ function avatarColor(name: string) {
 
 const FILTERS = ["all", "new", "enriched", "audited", "ready", "sequencing", "replied", "interested", "meeting", "error"];
 
-export default async function Leads({ searchParams }: { searchParams: Promise<{ msg?: string; status?: string; q?: string; page?: string }> }) {
-  const { msg, status = "all", q, page: pageParam } = await searchParams;
+/** Email filter: how far the lead's emails have got (LocalPulse-style). */
+const EMAIL_FILTERS: { value: string; label: string; match: (s: LeadEmailStatus | undefined) => boolean }[] = [
+  { value: "all", label: "All", match: () => true },
+  { value: "none", label: "No emails yet", match: (s) => !s },
+  { value: "draft", label: "Written, not approved", match: (s) => s?.icon === "draft" },
+  { value: "scheduled", label: "Scheduled", match: (s) => s?.icon === "scheduled" },
+  { value: "sent", label: "Sent (any)", match: (s) => !!s && ["sent", "opened", "viewed", "clicked", "replied"].includes(s.icon) },
+  { value: "not_opened", label: "Sent, not opened", match: (s) => s?.icon === "sent" },
+  { value: "opened", label: "Opened", match: (s) => !!s && ["opened", "viewed", "clicked"].includes(s.icon) },
+  { value: "clicked", label: "Clicked Book a call", match: (s) => s?.icon === "clicked" },
+  { value: "replied", label: "Replied", match: (s) => s?.icon === "replied" },
+  { value: "failed", label: "Failed to send", match: (s) => s?.icon === "failed" },
+];
+
+type LeadLite = { id: string; website: string | null; audited_at: string | null; audit_url: string | null; audit_reachable: boolean | null };
+
+/** Audit filter: has it run, did the site load, and have they read their report. */
+const AUDIT_FILTERS: { value: string; label: string; match: (l: LeadLite, s: LeadEmailStatus | undefined) => boolean }[] = [
+  { value: "all", label: "All", match: () => true },
+  { value: "done", label: "Audited", match: (l) => !!l.audited_at && l.audit_reachable !== false && !!l.audit_url },
+  { value: "pending", label: "Not audited yet", match: (l) => !!l.website && !l.audited_at },
+  { value: "unreachable", label: "Site didn't load", match: (l) => !!l.audit_url && l.audit_reachable === false },
+  { value: "no_site", label: "No website", match: (l) => !l.website },
+  { value: "viewed", label: "Report viewed", match: (_l, s) => !!s?.reportViewed },
+  { value: "not_viewed", label: "Report sent, not viewed", match: (l, s) => !!l.audited_at && !!s && !s.reportViewed && ["sent", "opened", "clicked", "replied"].includes(s.icon) },
+];
+
+export default async function Leads({
+  searchParams,
+}: {
+  searchParams: Promise<{ msg?: string; status?: string; q?: string; page?: string; email?: string; audit?: string }>;
+}) {
+  const { msg, status = "all", q, page: pageParam, email = "all", audit = "all" } = await searchParams;
   const page = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
-  let query = db()
-    .from("leads")
-    .select("*", { count: "exact" })
-    .order("created_at", { ascending: false })
-    .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
-  if (status !== "all") query = query.eq("status", status);
-  if (q) query = query.or(`company.ilike.%${q.replace(/[%,()]/g, "")}%,domain.ilike.%${q.replace(/[%,()]/g, "")}%`);
-  const [{ leads, total }, campaigns, counts] = await Promise.all([
-    query.then((r) => ({ leads: must(r) as Lead[], total: r.count ?? 0 })),
+  const term = q?.replace(/[%,()]/g, "");
+
+  // Every lead matching the status and search (light columns only), then the email/audit filters on top.
+  const base: LeadLite[] = [];
+  for (let from = 0; ; from += 1000) {
+    let lq = db()
+      .from("leads")
+      .select("id,website,audited_at,audit_url:audit->>url,audit_reachable:audit->reachable")
+      .order("created_at", { ascending: false })
+      .range(from, from + 999);
+    if (status !== "all") lq = lq.eq("status", status);
+    if (term) lq = lq.or(`company.ilike.%${term}%,domain.ilike.%${term}%`);
+    const rows = must(await lq) as LeadLite[];
+    base.push(...rows);
+    if (rows.length < 1000) break;
+  }
+  const [emailStatus, campaigns, counts] = await Promise.all([
+    emailStatuses(null),
     db()
       .from("campaigns")
       .select("id,name")
@@ -69,9 +110,27 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
       .then((r) => must(r) as { id: string; name: string }[]),
     leadStatusCounts(),
   ]);
+  const emailF = EMAIL_FILTERS.find((f) => f.value === email) ?? EMAIL_FILTERS[0];
+  const auditF = AUDIT_FILTERS.find((f) => f.value === audit) ?? AUDIT_FILTERS[0];
+  const matching = base.filter((l) => emailF.match(emailStatus.get(l.id)) && auditF.match(l, emailStatus.get(l.id)));
+  // Counts in each dropdown respect the other filters, so the numbers always add up to what you'd see.
+  const emailOptions = EMAIL_FILTERS.map((f) => ({ value: f.value, label: f.label, count: base.filter((l) => auditF.match(l, emailStatus.get(l.id)) && f.match(emailStatus.get(l.id))).length }));
+  const auditOptions = AUDIT_FILTERS.map((f) => ({ value: f.value, label: f.label, count: base.filter((l) => emailF.match(emailStatus.get(l.id)) && f.match(l, emailStatus.get(l.id))).length }));
+
+  const total = matching.length;
+  const slice = matching.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((l) => l.id);
+  const rows = slice.length ? (must(await db().from("leads").select("*").in("id", slice)) as Lead[]) : [];
+  const leads = slice.map((id) => rows.find((r) => r.id === id)).filter((l): l is Lead => !!l);
+
   const countOf = new Map(counts.byStatus).set("all", counts.total);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const pageHref = (n: number) => `/leads?${new URLSearchParams({ status, ...(q ? { q } : {}), ...(n > 1 ? { page: String(n) } : {}) })}`;
+  const filterParams = { status, q, email, audit };
+  const pageHref = (n: number) => {
+    const u = new URLSearchParams();
+    for (const [k, v] of Object.entries({ ...filterParams, page: n > 1 ? String(n) : undefined })) if (v && v !== "all") u.set(k, v);
+    return `/leads${u.size ? `?${u}` : ""}`;
+  };
+  const filtered = !!q || status !== "all" || email !== "all" || audit !== "all";
   // Page numbers to show: first, last, and two either side of the current page.
   const pageNums = Array.from({ length: pages }, (_, i) => i + 1).filter((n) => n === 1 || n === pages || Math.abs(n - page) <= 2);
   const CampaignSelect = () => (
@@ -95,7 +154,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
     { id: "error", label: "Need fixing", icon: CircleAlert, tone: "red" },
   ];
 
-  const countOptions = FILTERS.map((f) => ({ value: f, count: countOf.get(f) ?? 0 }));
+  const countOptions = FILTERS.map((f) => ({ value: f, label: f === "all" ? "All statuses" : f.replace(/_/g, " "), count: countOf.get(f) ?? 0 }));
 
   return (
     <>
@@ -329,17 +388,21 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
 
       <div className="toolbar leads-toolbar">
         <form className="search" action="/leads">
-          <input type="hidden" name="status" value={status} />
+          {status !== "all" && <input type="hidden" name="status" value={status} />}
+          {email !== "all" && <input type="hidden" name="email" value={email} />}
+          {audit !== "all" && <input type="hidden" name="audit" value={audit} />}
           <Search size={16} className="search-icon" aria-hidden="true" />
           <input name="q" defaultValue={q} placeholder="Search company or domain…" />
         </form>
         <div className="leads-toolbar-right">
-          {(q || status !== "all") && (
+          {filtered && (
             <Link href="/leads" className="leads-clear">
               Clear filters
             </Link>
           )}
-          <StatusFilter status={status} q={q} options={countOptions} />
+          <FilterMenu param="email" title="Email" value={email} options={emailOptions} params={filterParams} />
+          <FilterMenu param="audit" title="Audit" value={audit} options={auditOptions} params={filterParams} />
+          <FilterMenu param="status" title="Status" value={status} options={countOptions} params={filterParams} />
         </div>
       </div>
 
@@ -359,6 +422,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                   <th>Score</th>
                   <th>PECR</th>
                   <th>Status</th>
+                  <th>Email</th>
                   <th style={{ width: 40 }} />
                 </tr>
               </thead>
@@ -419,6 +483,9 @@ export default async function Leads({ searchParams }: { searchParams: Promise<{ 
                           {friendlyError(l.last_error)}
                         </div>
                       )}
+                    </td>
+                    <td className="lc-email">
+                      <EmailStatusCell s={emailStatus.get(l.id)} />
                     </td>
                     <td className="lc-open">
                       <Link href={`/leads/${l.id}`} className="lead-open" aria-label={`Open ${l.company}`}>

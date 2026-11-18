@@ -1011,12 +1011,12 @@ img, svg, video { max-width: 100%; }
   table.leads-grid thead { display: none; }
   table.leads-grid tr {
     display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 8px 10px;
-    grid-template-areas: "co co co open" "contact contact contact contact" "score pecr status status";
+    grid-template-areas: "co co co open" "contact contact contact contact" "score pecr status status" "email email email email";
     padding: 12px 14px; border-bottom: 1px solid var(--line);
   }
   table.leads-grid tr:has(.lc-check) {
     grid-template-columns: auto auto auto 1fr auto;
-    grid-template-areas: "check co co co open" "check contact contact contact contact" "check score pecr status status";
+    grid-template-areas: "check co co co open" "check contact contact contact contact" "check score pecr status status" "check email email email email";
   }
   table.leads-grid tr:last-child { border-bottom: 0; }
   table.leads-grid td { display: block; padding: 0 !important; border: 0; min-width: 0; }
@@ -1027,6 +1027,7 @@ img, svg, video { max-width: 100%; }
   table.leads-grid .lc-pecr { grid-area: pecr; }
   table.leads-grid .lc-status { grid-area: status; justify-self: start; }
   table.leads-grid .lc-open { grid-area: open; }
+  table.leads-grid .lc-email { grid-area: email; padding-left: 50px !important; }
   .lead-email { max-width: 100%; }
   .lead-co-text .row-title { word-break: break-word; }
 
@@ -1165,3 +1166,18 @@ img, svg, video { max-width: 100%; }
 .et-summary { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); }
 .et-summary span { display: inline-flex; align-items: center; gap: 5px; }
 .et-summary .hot { color: var(--accent-text); font-weight: 650; }
+
+/* ---- Leads list: email status column ---- */
+.lc-email-status { display: flex; flex-direction: column; gap: 2px; min-width: 150px; }
+.lc-email-status .small { font-size: 12px; }
+.es-pill { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; font-size: 12px; font-weight: 650; padding: 3px 9px; border-radius: 999px; white-space: nowrap; border: 1px solid var(--line); background: var(--bg); color: var(--muted); }
+.es-pill.info { background: #eaf2ff; color: #2459c4; border-color: #c7d9fb; }
+.es-pill.good { background: #e7f6ef; color: var(--good); border-color: #bfe3d1; }
+.es-pill.hot { background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-line); }
+.es-pill.bad { background: #fdecea; color: var(--bad); border-color: #f2c4bf; }
+
+/* Leads toolbar: Email / Audit / Status filters side by side, wrapping when space runs out */
+.leads-toolbar { flex-wrap: wrap; gap: 10px; }
+.leads-toolbar-right { flex-wrap: wrap; justify-content: flex-end; }
+.leads-toolbar .filter-menu a, .leads-toolbar .filter .filter-btn b { text-transform: none; }
+.leads-toolbar .filter .filter-btn b::first-letter { text-transform: uppercase; }

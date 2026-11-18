@@ -6,7 +6,7 @@ import { displayScore, groupChecks, HIGH_ISSUE_CEILING } from "@/lib/audit/analy
 import { brand } from "@/lib/brand";
 import { db } from "@/lib/db";
 import type { AeoAudit, Audit, AuditCheck, Lead } from "@/lib/types";
-import { messageIdFrom } from "@/lib/tracking";
+import { justEmailed, messageIdFrom } from "@/lib/tracking";
 import { PrintButton } from "./PrintButton";
 import s from "./p.module.css";
 
@@ -309,7 +309,8 @@ export default async function AuditPage({ params, searchParams }: { params: Prom
 
   const h = await headers();
   const ua = h.get("user-agent") ?? "";
-  if (!BOT.test(ua)) await db().from("events").insert({ lead_id: lead.id, type: "page_view", meta: { ua: ua.slice(0, 200), ...(fromEmail ? { message_id: fromEmail } : {}) } });
+  // Mail scanners open links seconds after an email lands: not a person reading the report.
+  if (!BOT.test(ua) && !(await justEmailed(lead.id))) await db().from("events").insert({ lead_id: lead.id, type: "page_view", meta: { ua: ua.slice(0, 200), ...(fromEmail ? { message_id: fromEmail } : {}) } });
 
   const a: Audit | null = lead.audit;
   const hi = lead.first_name ? `Hi ${lead.first_name}. ` : "";

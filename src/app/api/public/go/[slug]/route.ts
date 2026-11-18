@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { BOT_UA, messageIdFrom } from "@/lib/tracking";
+import { BOT_UA, justEmailed, messageIdFrom } from "@/lib/tracking";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +10,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   if (!lead) return Response.redirect(new URL("/book", req.url), 302);
   // ?m= is the email the link came from (sequence emails), so the click is credited to that email.
   const m = messageIdFrom(new URL(req.url).searchParams.get("m"));
-  // Link scanners (Safe Links, Mimecast...) follow links automatically; only count people.
-  if (!BOT_UA.test(req.headers.get("user-agent") ?? "")) {
+  // Link scanners (Safe Links, Mimecast...) follow links automatically, seconds after the email lands; only count people.
+  if (!BOT_UA.test(req.headers.get("user-agent") ?? "") && !(await justEmailed(lead.id))) {
     await db().from("events").insert({ lead_id: lead.id, type: "booking_click", meta: m ? { message_id: m } : {} });
   }
   const { data: campaign } = await db().from("campaigns").select("booking_url").eq("id", lead.campaign_id).maybeSingle();

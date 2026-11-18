@@ -31,6 +31,7 @@ import { friendlyError } from "@/lib/errors";
 import { displayScore } from "@/lib/audit/analyze";
 import { askedForReport, reportEmail, reportMailbox } from "@/lib/inbound";
 import type { AuditCheck, Lead, Message } from "@/lib/types";
+import { isScannerHit } from "@/lib/tracking";
 import { EmailTrackChips, TrackingSummary, statsByEmail, type TrackEvent } from "./EmailTracking";
 import { LeadNowStrip, LeadStatusButton, LeadStatusWindow } from "./LeadProgress";
 
@@ -149,11 +150,16 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const perf = audit?.performance;
   const timeline = groupEvents(events);
   const initial = (lead.company || "?").trim().charAt(0).toUpperCase();
-  const emailStats = statsByEmail(tracking);
+  // Mail scanners open every link within seconds of an email arriving; those aren't the person.
+  const sentAts = messages.filter((m) => m.direction === "out" && m.status === "sent").map((m) => m.sent_at);
+  const realTracking = tracking.filter((e) => e.type === "email_sent" || !isScannerHit(e.created_at, sentAts));
+  const emailStats = statsByEmail(realTracking);
   const sentOut = history.filter((m) => m.direction === "out" && m.status === "sent");
   const opens = [...emailStats.values()].filter((s) => s.opens || s.views || s.clicks).length;
-  const clicks = tracking.filter((e) => e.type === "booking_click").length;
-  const progress = { lead, messages, views, reportSent, opens, clicks };
+  const clicks = realTracking.filter((e) => e.type === "booking_click").length;
+  const pageViews = (xs: TrackEvent[]) => xs.filter((e) => e.type === "page_view").length;
+  const realViews = Math.max(0, views - (pageViews(tracking) - pageViews(realTracking)));
+  const progress = { lead, messages, views: realViews, reportSent, opens, clicks };
 
   // A cold lead with a written sequence: show the sequence first, the one-off report email after it.
   const seqFirst = cold && editable.length > 0;
