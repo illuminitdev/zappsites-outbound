@@ -104,12 +104,14 @@ export async function pageSpeed(url: string): Promise<Audit["performance"]> {
       cls: typeof cls === "number" ? Math.round(cls * 1000) / 1000 : null,
       fieldLcpSeconds: typeof field === "number" ? Math.round(field / 100) / 10 : null,
     };
-  } catch {
+  } catch (e) {
+    // Without PAGESPEED_API_KEY Google's shared quota runs out (429) and the report shows "–".
+    console.log("[audit] pagespeed failed", url, (e as Error).message, key ? "" : "(no PAGESPEED_API_KEY set)");
     return { mobileScore: null, lcpSeconds: null, cls: null };
   }
 }
 
-function perfCheck(p: Audit["performance"]): AuditCheck | null {
+export function perfCheck(p: Audit["performance"]): AuditCheck | null {
   if (p.mobileScore === null) return null;
   // Prefer what real visitors experience; fall back to Google's lab test.
   const lcp = p.fieldLcpSeconds ?? p.lcpSeconds;
