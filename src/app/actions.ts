@@ -379,17 +379,21 @@ export async function sendReportAction(f: FormData) {
 // ---- inbox ----
 
 export async function replyAction(f: FormData) {
+  // Back to the conversation the reply was sent from (only inbox paths), else the inbox.
+  const from = str(f, "back");
+  const path = /^\/inbox(\/[\w-]+)?$/.test(from) ? from : "/inbox";
   try {
     await sendReply(str(f, "id"), str(f, "body"));
   } catch (e) {
-    return back("/inbox", `Send failed: ${(e as Error).message}`);
+    return back(path, `Send failed: ${(e as Error).message}`);
   }
-  back("/inbox", "Reply sent");
+  revalidatePath("/inbox", "layout");
+  back(path, "Reply sent");
 }
 
 export async function markHandled(f: FormData) {
   must(await db().from("messages").update({ handled: true }).eq("id", str(f, "id")));
-  revalidatePath("/inbox");
+  revalidatePath("/inbox", "layout");
 }
 
 // ---- public ----
