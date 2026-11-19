@@ -1,6 +1,4 @@
-// Give every not-yet-sent outreach email the standard subject ("Website audit for <site>", follow-ups "Re: ...").
-// Leads that already got an email keep their old subject, so follow-ups stay in the same thread.
-// `npx tsx scripts/subject-fix.mts`  (add --dry to only print what would change)
+
 import { existsSync } from "node:fs";
 if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 else if (existsSync(".env")) process.loadEnvFile(".env");

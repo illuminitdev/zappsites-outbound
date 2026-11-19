@@ -150,9 +150,14 @@ export default async function Campaigns({ searchParams }: { searchParams: Promis
                     <b>{st.leads}</b>
                     <span>Leads</span>
                   </Link>
-                  <Link href="/leads?status=ready" className={`camp-stat ${st.ready ? "hl" : ""}`}>
+                  <Link
+                    href="/leads?status=ready"
+                    className={`camp-stat ${st.ready ? "hl" : ""}`}
+                    title={c.auto_approve ? "Emails are written but not sent until the business is confirmed as a Ltd or LLP on Companies House (PECR). Re-checked every 3 days." : undefined}
+                  >
                     <b>{st.ready}</b>
-                    <span>To approve</span>
+                    {/* Auto-approve sends every confirmed company itself, so anything left "ready" is waiting on the PECR company check. */}
+                    <span>{c.auto_approve ? "On hold (company check)" : "To approve"}</span>
                   </Link>
                   <div className="camp-stat">
                     <b>{st.sent}</b>
