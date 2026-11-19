@@ -349,12 +349,27 @@ button:disabled { cursor: progress; opacity: .75; }
 .hist-summary span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 .hist-day { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
 .hist-day-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 14px; background: #fafafa; border-bottom: 1px solid var(--line); }
-.hist-table th { padding: 8px 14px; }
-.hist-table td { padding: 9px 14px; }
-.hist-table .num { text-align: right; width: 80px; }
-.hist-table td.bad { color: var(--bad); font-weight: 600; }
+/* table.plain prefix: beats "table.plain td" padding, so headings and numbers line up */
+table.plain.hist-table th { padding: 8px 14px; }
+table.plain.hist-table td { padding: 9px 14px; }
+table.plain.hist-table .num { text-align: right; width: 90px; font-variant-numeric: tabular-nums; }
+.hist-num { display: inline-block; min-width: 34px; padding: 2px 8px; margin-right: -8px; border-radius: 6px; font-weight: 700; color: var(--ink); text-decoration: none; text-align: right; }
+.hist-num:hover { background: var(--accent-soft); color: var(--ink); text-decoration: underline; }
+.hist-num.bad { color: var(--bad); }
+.hist-num.bad:hover { background: #fdf0ef; }
+.hist-link { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.hist-link:hover { color: var(--ink); text-decoration-color: currentColor; }
+.hist-link.bad { color: var(--bad); }
 @media (max-width: 700px) { .hist-summary { grid-template-columns: repeat(2, 1fr); } }
 .modal-form { padding-top: 6px; }
+/* Small "are you sure?" dialog (e.g. Mark meeting booked) */
+.confirm-form { padding-top: 12px; }
+.confirm-form p { margin: 0 0 8px; }
+.confirm-lead { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.confirm-lead svg { color: var(--accent); flex-shrink: 0; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.confirm-actions button { margin-top: 0; }
+@media (max-width: 520px) { .confirm-actions { flex-direction: column-reverse; } .confirm-actions button { width: 100%; } }
 .modal-form p { margin: 0 0 6px; }
 .modal-form button[type="submit"], .modal-form button:not([type]) { width: 100%; margin-top: 16px; }
 .modal .add-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); padding-top: 10px; align-items: stretch; }
@@ -390,6 +405,17 @@ button:disabled { cursor: progress; opacity: .75; }
 .filter-menu a.on { font-weight: 600; }
 .filter-check { width: 14px; display: inline-flex; color: var(--accent); }
 .filter-name { flex: 1; }
+/* Leads "Sent on" filter: kind tabs, quick ranges and a date picker */
+.sent-menu { min-width: 260px; }
+.sent-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 3px; margin-bottom: 6px; background: var(--bg); border-radius: 8px; }
+.sent-kinds button { margin: 0; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; }
+.sent-kinds button:hover { color: var(--ink); }
+.sent-kinds button.on { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(16, 18, 24, .12); }
+.sent-date { margin-top: 6px; padding: 8px 10px 6px; border-top: 1px solid var(--line); }
+.sent-date label { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 13px; color: var(--muted); font-weight: 500; }
+.sent-date label .filter-count { margin-left: auto; }
+.sent-date input { width: 100%; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
+.sent-date input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 .send-report { scroll-margin-top: 80px; border-color: var(--accent-line); }
 .send-report .form-foot button { width: auto; }
@@ -575,6 +601,9 @@ button:disabled { cursor: progress; opacity: .75; }
 .leads-toolbar-right { display: flex; align-items: center; gap: 10px; }
 .leads-clear { font-size: 13px; color: var(--muted); }
 .leads-clear:hover { color: var(--ink); }
+.leads-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--accent-soft); color: var(--ink); font-size: 13px; text-decoration: none; max-width: 260px; }
+.leads-chip svg:last-child { color: var(--muted); }
+.leads-chip:hover svg:last-child { color: var(--ink); }
 
 .leads-table { border-radius: 12px; overflow: hidden; }
 .leads-table table.data th { background: #fafaf9; font-size: 11px; letter-spacing: .06em; }
@@ -840,6 +869,16 @@ a.camp-stat:hover { text-decoration: none; background: var(--accent-soft); }
 .ld-contact-line > span:not(.pill) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ld-contact-line svg { flex: none; color: var(--muted); }
 a.ld-contact-line:hover { text-decoration: none; background: var(--accent-soft); }
+.ld-contact-email > a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.ld-contact-email > a:hover { text-decoration: underline; }
+.ld-contact-email > .muted { flex: 1; }
+button.ld-contact-edit { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; margin: -4px -4px -4px 0; padding: 0; border-radius: 6px; background: transparent; border: 1px solid transparent; color: var(--muted); }
+button.ld-contact-edit:hover { background: var(--card); border-color: var(--line); color: var(--ink); }
+.email-edit-field { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.email-edit-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.email-edit-field svg { color: var(--muted); flex: none; }
+.email-edit-field input { flex: 1; border: 0; outline: 0; padding: 10px 0; margin: 0; background: transparent; box-shadow: none; font: inherit; }
+.email-edit-error { color: var(--bad); font-size: 13px; }
 
 .ld-score { display: flex; align-items: center; gap: 16px; }
 .ld-ring { --c: var(--muted); flex: none; width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--c) calc(var(--p) * 1%), var(--line) 0); }
@@ -1028,10 +1067,10 @@ img, svg, video { max-width: 100%; }
   .modal-head { padding: 12px 16px; }
   .modal-body { padding: 8px 16px 20px; }
   .hist-summary b { font-size: 18px; }
-  .hist-table th, .hist-table td { padding: 8px 6px; font-size: 13px; }
-  .hist-table th:first-child, .hist-table td:first-child { padding-left: 12px; word-break: break-all; }
-  .hist-table .num { width: auto; }
-  .hist-table th:last-child, .hist-table td:last-child { padding-right: 12px; }
+  table.plain.hist-table th, table.plain.hist-table td { padding: 8px 6px; font-size: 13px; }
+  table.plain.hist-table th:first-child, table.plain.hist-table td:first-child { padding-left: 12px; word-break: break-all; }
+  table.plain.hist-table .num { width: auto; }
+  table.plain.hist-table th:last-child, table.plain.hist-table td:last-child { padding-right: 12px; }
   .hist-day-head { padding: 10px 12px; }
 
   /* Leads table becomes a list of cards. */

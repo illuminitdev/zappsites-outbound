@@ -7,17 +7,41 @@ const JUNK = /(\.(png|jpe?g|gif|svg|webp)$)|sentry|wixpress|example\.|domain\.co
 const GENERIC = ["info", "hello", "enquiries", "enquiry", "contact", "office", "admin", "sales", "mail", "team", "help", "support"];
 
 export function isValidSyntax(email: string): boolean {
-  return /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(email);
+  // No "%": real addresses never use it, and a leading "%20" (an encoded space from a mailto: link) bounces.
+  return /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(email);
+}
+
+const safeDecode = (s: string) => {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+};
+
+/**
+ * Tidy an address picked up from a page, CSV or form: decodes URL escapes (e.g. "%20info@x.co.uk" from
+ * href="mailto:%20info@x.co.uk"), drops "mailto:", spaces, brackets/quotes and a trailing dot.
+ */
+export function cleanEmail(raw: string): string {
+  return safeDecode(raw)
+    .toLowerCase()
+    .replace(/^\s*mailto:/, "")
+    .replace(/\s+/g, "")
+    .replace(/^[<"'(]+|[>"')]+$/g, "")
+    .replace(/\.$/, "");
 }
 
 /** Pull plausible addresses out of HTML, decoding simple obfuscation. */
 export function extractEmails(html: string, domain: string | null): string[] {
   const decoded = html
     .replace(/&#64;|&#x40;|\s\[at\]\s|\(at\)/gi, "@")
-    .replace(/&#46;|\s\[dot\]\s|\(dot\)/gi, ".");
+    .replace(/&#46;|\s\[dot\]\s|\(dot\)/gi, ".")
+    // URL-encoded mailto: links, e.g. href="mailto:%20info%40site.co.uk"
+    .replace(/mailto:([^"'\s<>]+)/gi, (_m, a: string) => `mailto: ${safeDecode(a)}`);
   const found = new Set<string>();
   for (const m of decoded.matchAll(EMAIL_RE)) {
-    const e = m[0].toLowerCase().replace(/^mailto:/, "").replace(/\.$/, "");
+    const e = cleanEmail(m[0]).replace(/^(%[0-9a-f]{2})+/i, "");
     if (!JUNK.test(e) && isValidSyntax(e)) found.add(e);
   }
   const all = [...found];
@@ -142,7 +166,7 @@ export async function findEmail(p: {
   firstName?: string | null;
 }): Promise<EmailResult> {
   const domain = toDomain(p.website);
-  let email = p.email?.toLowerCase().trim() || null;
+  let email = p.email ? cleanEmail(p.email) || null : null;
   let source: string | null = email ? "csv" : null;
   let firstName: string | undefined;
   let lastName: string | undefined;

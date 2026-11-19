@@ -21,6 +21,7 @@ import {
   UploadCloud,
   UserRound,
   Users,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { approveSelected, createManualAudit, importCompaniesHouse, importCsv, importPlaces } from "@/app/actions";
@@ -32,9 +33,13 @@ import { Empty, Flash, Pill, Score } from "@/components/ui";
 import { db, must } from "@/lib/db";
 import { friendlyError } from "@/lib/errors";
 import { leadStatusCounts } from "@/lib/stats";
+import { HISTORY_DAYS, loadSendRows, londonDay, type SendKind } from "@/lib/mailboxHistory";
 import { TRADES } from "@/lib/inbound";
 import type { Lead } from "@/lib/types";
 import { EmailStatusCell, emailStatuses, type LeadEmailStatus } from "./emailStatus";
+import { SentFilter } from "./SentFilter";
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // "Send audit" runs the audit inside the server action, which can take a minute or two.
 export const maxDuration = 300;
@@ -81,9 +86,9 @@ const AUDIT_FILTERS: { value: string; label: string; match: (l: LeadLite, s: Lea
 export default async function Leads({
   searchParams,
 }: {
-  searchParams: Promise<{ msg?: string; status?: string; q?: string; page?: string; email?: string; audit?: string }>;
+  searchParams: Promise<{ msg?: string; status?: string; q?: string; page?: string; email?: string; audit?: string; sent?: string; mailbox?: string }>;
 }) {
-  const { msg, status = "all", q, page: pageParam, email = "all", audit = "all" } = await searchParams;
+  const { msg, status = "all", q, page: pageParam, email = "all", audit = "all", sent = "all", mailbox } = await searchParams;
   const page = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
   const term = q?.replace(/[%,()]/g, "");
 
@@ -101,7 +106,7 @@ export default async function Leads({
     base.push(...rows);
     if (rows.length < 1000) break;
   }
-  const [emailStatus, campaigns, counts] = await Promise.all([
+  const [emailStatus, campaigns, counts, sendRows, mailboxes] = await Promise.all([
     emailStatuses(null),
     db()
       .from("campaigns")
@@ -109,13 +114,49 @@ export default async function Leads({
       .order("created_at", { ascending: false })
       .then((r) => must(r) as { id: string; name: string }[]),
     leadStatusCounts(),
+    loadSendRows(DATE_RE.test(sent.split(":")[1] ?? "") ? sent.split(":")[1] : undefined),
+    db()
+      .from("mailboxes")
+      .select("id,email")
+      .then((r) => must(r) as { id: string; email: string }[]),
   ]);
+  // "Sent on" filter: leads emailed / failed / replied today, yesterday, in the last 30 days or on a picked date.
+  // Value is "<kind>:<range>", e.g. "sent:today", "failed:30d", "replied:2026-11-18" ("all" = no filter).
+  const mailboxEmail = mailbox ? (mailboxes.find((m) => m.id === mailbox)?.email ?? "Removed mailbox") : null;
+  const today = londonDay(0);
+  const yesterday = londonDay(1);
+  const monthStart = londonDay(HISTORY_DAYS - 1);
+  const [kindRaw, rangeRaw = ""] = sent.split(":");
+  const sentKind: SendKind = (["sent", "failed", "replied"] as const).find((k) => k === kindRaw) ?? "sent";
+  const sentRange = ["today", "yesterday", "30d"].includes(rangeRaw) || DATE_RE.test(rangeRaw) ? rangeRaw : null;
+  const sentActive = sent !== "all" && !!sentRange;
+  const dayOf = (range: string) => (range === "today" ? today : range === "yesterday" ? yesterday : range);
+  const leadSet = (kind: SendKind, range: string) => {
+    const set = new Set<string>();
+    for (const r of sendRows) {
+      if (r.kind !== kind || (mailbox && r.mailboxId !== mailbox)) continue;
+      if (range === "30d" ? r.day < monthStart : r.day !== dayOf(range)) continue;
+      set.add(r.leadId);
+    }
+    return set;
+  };
+  const activeSet = sentActive ? leadSet(sentKind, sentRange!) : null;
+  const sentMatch = (id: string) => !activeSet || activeSet.has(id);
   const emailF = EMAIL_FILTERS.find((f) => f.value === email) ?? EMAIL_FILTERS[0];
   const auditF = AUDIT_FILTERS.find((f) => f.value === audit) ?? AUDIT_FILTERS[0];
-  const matching = base.filter((l) => emailF.match(emailStatus.get(l.id)) && auditF.match(l, emailStatus.get(l.id)));
+  const matching = base.filter((l) => emailF.match(emailStatus.get(l.id)) && auditF.match(l, emailStatus.get(l.id)) && sentMatch(l.id));
   // Counts in each dropdown respect the other filters, so the numbers always add up to what you'd see.
-  const emailOptions = EMAIL_FILTERS.map((f) => ({ value: f.value, label: f.label, count: base.filter((l) => auditF.match(l, emailStatus.get(l.id)) && f.match(emailStatus.get(l.id))).length }));
-  const auditOptions = AUDIT_FILTERS.map((f) => ({ value: f.value, label: f.label, count: base.filter((l) => emailF.match(emailStatus.get(l.id)) && f.match(l, emailStatus.get(l.id))).length }));
+  const emailOptions = EMAIL_FILTERS.map((f) => ({ value: f.value, label: f.label, count: base.filter((l) => auditF.match(l, emailStatus.get(l.id)) && sentMatch(l.id) && f.match(emailStatus.get(l.id))).length }));
+  const auditOptions = AUDIT_FILTERS.map((f) => ({ value: f.value, label: f.label, count: base.filter((l) => emailF.match(emailStatus.get(l.id)) && sentMatch(l.id) && f.match(l, emailStatus.get(l.id))).length }));
+  // Counts for the "Sent on" menu: every kind x range (plus the picked date), with the other filters applied.
+  const others = base.filter((l) => emailF.match(emailStatus.get(l.id)) && auditF.match(l, emailStatus.get(l.id)));
+  const sentRanges = ["today", "yesterday", "30d", ...(sentRange && DATE_RE.test(sentRange) ? [sentRange] : [])];
+  const sentCounts: Record<string, number> = { all: others.length };
+  for (const k of ["sent", "failed", "replied"] as const)
+    for (const r of sentRanges) {
+      const set = leadSet(k, r);
+      sentCounts[`${k}:${r}`] = others.filter((l) => set.has(l.id)).length;
+    }
 
   const total = matching.length;
   const slice = matching.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((l) => l.id);
@@ -124,13 +165,18 @@ export default async function Leads({
 
   const countOf = new Map(counts.byStatus).set("all", counts.total);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const filterParams = { status, q, email, audit };
+  const filterParams = { status, q, email, audit, sent, mailbox };
   const pageHref = (n: number) => {
     const u = new URLSearchParams();
     for (const [k, v] of Object.entries({ ...filterParams, page: n > 1 ? String(n) : undefined })) if (v && v !== "all") u.set(k, v);
     return `/leads${u.size ? `?${u}` : ""}`;
   };
-  const filtered = !!q || status !== "all" || email !== "all" || audit !== "all";
+  const filtered = !!q || status !== "all" || email !== "all" || audit !== "all" || sent !== "all" || !!mailbox;
+  const withoutMailbox = (() => {
+    const u = new URLSearchParams();
+    for (const [k, v] of Object.entries({ ...filterParams, mailbox: undefined })) if (v && v !== "all") u.set(k, v);
+    return `/leads${u.size ? `?${u}` : ""}`;
+  })();
   // Page numbers to show: first, last, and two either side of the current page.
   const pageNums = Array.from({ length: pages }, (_, i) => i + 1).filter((n) => n === 1 || n === pages || Math.abs(n - page) <= 2);
   const CampaignSelect = () => (
@@ -391,6 +437,8 @@ export default async function Leads({
           {status !== "all" && <input type="hidden" name="status" value={status} />}
           {email !== "all" && <input type="hidden" name="email" value={email} />}
           {audit !== "all" && <input type="hidden" name="audit" value={audit} />}
+          {sent !== "all" && <input type="hidden" name="sent" value={sent} />}
+          {mailbox && <input type="hidden" name="mailbox" value={mailbox} />}
           <Search size={16} className="search-icon" aria-hidden="true" />
           <input name="q" defaultValue={q} placeholder="Search company or domain…" />
         </form>
@@ -400,6 +448,14 @@ export default async function Leads({
               Clear filters
             </Link>
           )}
+          {mailboxEmail && (
+            <Link href={withoutMailbox} className="leads-chip" title="Remove the mailbox filter">
+              <Mail size={13} aria-hidden="true" />
+              {mailboxEmail}
+              <X size={13} aria-hidden="true" />
+            </Link>
+          )}
+          <SentFilter value={sentActive ? `${sentKind}:${sentRange}` : "all"} counts={sentCounts} params={filterParams} today={today} />
           <FilterMenu param="email" title="Email" value={email} options={emailOptions} params={filterParams} />
           <FilterMenu param="audit" title="Audit" value={audit} options={auditOptions} params={filterParams} />
           <FilterMenu param="status" title="Status" value={status} options={countOptions} params={filterParams} />
@@ -409,8 +465,8 @@ export default async function Leads({
       <form action={approveSelected}>
         <div className="card table-card leads-table">
           {leads.length === 0 ? (
-            <Empty icon={Users} title={q ? "No leads match your search" : status === "all" ? "No leads yet" : `No leads in “${status}”`}>
-              {status === "all" && !q ? "Use Add leads or Upload CSV above to import some." : null}
+            <Empty icon={Users} title={q ? "No leads match your search" : !filtered ? "No leads yet" : status !== "all" ? `No leads in “${status}”` : "No leads match these filters"}>
+              {!filtered ? "Use Add leads or Upload CSV above to import some." : null}
             </Empty>
           ) : (
             <table className="data leads-grid">

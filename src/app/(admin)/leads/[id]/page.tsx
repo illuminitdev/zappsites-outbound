@@ -23,7 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { notFound } from "next/navigation";
-import { approveOne, auditLeadNow, confirmPecr, meetingBooked, resetLead, saveDraft, sendReportAction } from "@/app/actions";
+import { approveOne, auditLeadNow, confirmPecr, resetLead, retryWriting, saveDraft, sendReportAction } from "@/app/actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Flash, Pill, fmt } from "@/components/ui";
 import { db, must } from "@/lib/db";
@@ -34,6 +34,8 @@ import type { AuditCheck, Lead, Message } from "@/lib/types";
 import { isScannerHit } from "@/lib/tracking";
 import { EmailTrackChips, TrackingSummary, statsByEmail, type TrackEvent } from "./EmailTracking";
 import { LeadNowStrip, LeadStatusButton, LeadStatusWindow } from "./LeadProgress";
+import { MeetingBookedButton } from "./MeetingBookedButton";
+import { EditEmailButton } from "./EditEmailButton";
 
 const PROMPT_SOURCE = { website: "from their website", campaign: "campaign", fallback: "generic (couldn't read site)", default: "generic" } as const;
 const IMPACT_ORDER = { high: 0, medium: 1, low: 2 } as const;
@@ -127,6 +129,20 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
       .then((r) => (r.error ? [] : (r.data as TrackEvent[]))),
   ]);
   if (!lead) notFound();
+  // "Duplicate: x@y.co.uk already belongs to another lead (...)": link to that lead.
+  const dupEmail = lead.last_error?.match(/^Duplicate: (\S+@\S+) already belongs/)?.[1];
+  const dupOf = dupEmail
+    ? ((
+        must(
+          await db()
+            .from("leads")
+            .select("id,company")
+            .ilike("email", dupEmail.replace(/[\\%_]/g, (c) => `\\${c}`))
+            .neq("id", lead.id)
+            .limit(1),
+        ) as { id: string; company: string }[]
+      )[0] ?? null)
+    : null;
   const editable = messages.filter((m) => m.direction === "out" && ["draft", "scheduled"].includes(m.status));
   const history = messages.filter((m) => !editable.includes(m));
   const hasReplies = history.some((m) => m.direction === "in");
@@ -279,12 +295,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                 </SubmitButton>
               </form>
             )}
-            <form action={meetingBooked}>
-              <input type="hidden" name="id" value={lead.id} />
-              <SubmitButton className="secondary" pending="Saving...">
-                Mark meeting booked
-              </SubmitButton>
-            </form>
+            <MeetingBookedButton leadId={lead.id} company={lead.company || "this lead"} />
           </div>
         </div>
       </header>
@@ -299,6 +310,20 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             Something went wrong with this lead
           </b>
           <p className="small">{friendlyError(lead.last_error)}</p>
+          {dupOf && (
+            <p className="small">
+              <Link href={`/leads/${dupOf.id}`}>Open the other lead ({dupOf.company}) →</Link>
+            </p>
+          )}
+          {lead.status === "error" && lead.last_error.startsWith("Write:") && (
+            <form action={retryWriting} style={{ margin: "4px 0 8px" }}>
+              <input type="hidden" name="id" value={lead.id} />
+              <SubmitButton className="secondary sm" pending="Queuing...">
+                <RotateCcw size={14} aria-hidden="true" />
+                Retry writing the emails
+              </SubmitButton>
+            </form>
+          )}
           <details className="muted small">
             <summary>Technical details</summary>
             <code className="mono">{lead.last_error}</code>
@@ -661,17 +686,24 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               Contact
             </h2>
             <b className="ld-contact-name">{name || "No name yet"}</b>
-            {lead.email ? (
-              <a href={`mailto:${lead.email}`} className="ld-contact-line">
-                <Mail size={14} aria-hidden="true" />
-                <span>{lead.email}</span>
-                <Pill v={lead.email_status} />
-              </a>
-            ) : (
-              <span className="ld-contact-line muted">
-                <Mail size={14} aria-hidden="true" /> no email
-              </span>
-            )}
+            <div className="ld-contact-line ld-contact-email">
+              <Mail size={14} aria-hidden="true" />
+              {lead.email ? (
+                <>
+                  <a href={`mailto:${lead.email}`} title={lead.email}>
+                    {lead.email}
+                  </a>
+                  <Pill v={lead.email_status} />
+                </>
+              ) : (
+                <span className="muted">no email</span>
+              )}
+              <EditEmailButton
+                leadId={lead.id}
+                email={lead.email}
+                failed={messages.some((m) => m.direction === "out" && m.status === "failed")}
+              />
+            </div>
             {lead.website && (
               <a href={lead.website} target="_blank" rel="noreferrer" className="ld-contact-line">
                 <Globe size={14} aria-hidden="true" />

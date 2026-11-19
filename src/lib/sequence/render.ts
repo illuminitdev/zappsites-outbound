@@ -29,6 +29,15 @@ export function renderEmail(r: RenderInput): string {
   ].join("\n");
 }
 
+/**
+ * The one subject every outreach email uses: plain and clear about what it is ("Website audit for acme.co.uk").
+ * Follow-ups reuse it as "Re: ..." so they stay in the same thread.
+ */
+export function auditSubject(lead: { domain?: string | null; website?: string | null; company?: string | null }): string {
+  const site = lead.domain || lead.website?.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/.*$/, "");
+  return `Website audit for ${site || lead.company || "your business"}`;
+}
+
 export function threadSubject(firstSubject: string, step: number): string {
   if (step === 0) return firstSubject;
   return /^re:/i.test(firstSubject) ? firstSubject : `Re: ${firstSubject}`;

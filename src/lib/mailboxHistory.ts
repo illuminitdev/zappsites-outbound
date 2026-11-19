@@ -7,6 +7,7 @@ export const HISTORY_TZ = "Europe/London";
 export const HISTORY_DAYS = 30;
 
 export interface HistoryMessage {
+  lead_id?: string | null;
   mailbox_id: string | null;
   direction: "out" | "in";
   status: string;
@@ -80,10 +81,9 @@ export function buildHistory(messages: HistoryMessage[]): HistoryDay[] {
     });
 }
 
-/** Load the last HISTORY_DAYS days of sends, failures and replies (paged, so large volumes still load). */
-export async function loadMailboxHistory(): Promise<HistoryDay[]> {
-  const since = new Date(Date.now() - (HISTORY_DAYS + 1) * 86400_000).toISOString();
-  const cols = "mailbox_id, direction, status, sent_at, scheduled_for, received_at";
+/** The last HISTORY_DAYS (+1) days of sends, failures and replies, raw (paged, so large volumes still load). */
+async function fetchHistoryRows(since = new Date(Date.now() - (HISTORY_DAYS + 1) * 86400_000).toISOString()): Promise<HistoryMessage[]> {
+  const cols = "lead_id, mailbox_id, direction, status, sent_at, scheduled_for, received_at";
   const rows: HistoryMessage[] = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
@@ -101,6 +101,51 @@ export async function loadMailboxHistory(): Promise<HistoryDay[]> {
     rows.push(...((data ?? []) as HistoryMessage[]));
     if (!data || data.length < PAGE) break;
   }
-  const cutoff = dayKey.format(new Date(Date.now() - (HISTORY_DAYS - 1) * 86400_000));
-  return buildHistory(rows).filter((d) => d.day >= cutoff);
+  return rows;
+}
+
+const cutoffDay = () => dayKey.format(new Date(Date.now() - (HISTORY_DAYS - 1) * 86400_000));
+
+/** YYYY-MM-DD (in HISTORY_TZ) for today minus `back` days. */
+export const londonDay = (back = 0) => dayKey.format(new Date(Date.now() - back * 86400_000));
+
+/** Load the last HISTORY_DAYS days of sends, failures and replies, grouped by day and mailbox. */
+export async function loadMailboxHistory(): Promise<HistoryDay[]> {
+  const cutoff = cutoffDay();
+  return buildHistory(await fetchHistoryRows()).filter((d) => d.day >= cutoff);
+}
+
+export type SendKind = "sent" | "failed" | "replied";
+
+/** One lead's send / fail / reply event on a day: what the Leads page "Sent on" filter is built from. */
+export interface SendRow {
+  leadId: string;
+  mailboxId: string;
+  kind: SendKind;
+  day: string; // YYYY-MM-DD in HISTORY_TZ
+}
+
+/**
+ * Every sent / failed email and every reply as (lead, mailbox, kind, day): the last HISTORY_DAYS days,
+ * or from `fromDay` (YYYY-MM-DD) if that's earlier, e.g. a date picked in the Leads calendar.
+ */
+export async function loadSendRows(fromDay?: string): Promise<SendRow[]> {
+  const cutoff = fromDay && fromDay < cutoffDay() ? fromDay : cutoffDay();
+  const since = new Date(new Date(`${cutoff}T00:00:00Z`).getTime() - 86400_000).toISOString();
+  const out: SendRow[] = [];
+  for (const m of await fetchHistoryRows(since)) {
+    const ev = classify(m);
+    if (!ev || !m.lead_id || !m.mailbox_id) continue;
+    const day = dayKey.format(new Date(ev.at));
+    const kind: SendKind = ev.kind === "replies" ? "replied" : ev.kind;
+    if (day >= cutoff) out.push({ leadId: m.lead_id, mailboxId: m.mailbox_id, kind, day });
+  }
+  return out;
+}
+
+/** Leads-page link for "leads sent / failed / replied on this day", optionally from one mailbox. */
+export function sentLeadsHref(kind: SendKind, day: string, mailboxId?: string) {
+  const u = new URLSearchParams({ sent: `${kind}:${day}` });
+  if (mailboxId) u.set("mailbox", mailboxId);
+  return `/leads?${u}`;
 }

@@ -1,6 +1,7 @@
+import Link from "next/link";
 import { History } from "lucide-react";
 import { Empty } from "@/components/ui";
-import { HISTORY_DAYS, HISTORY_TZ, type HistoryDay } from "@/lib/mailboxHistory";
+import { HISTORY_DAYS, HISTORY_TZ, sentLeadsHref, type HistoryDay } from "@/lib/mailboxHistory";
 
 const fmt = (iso: string, o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-GB", { timeZone: HISTORY_TZ, ...o }).format(new Date(iso));
 const time = (iso: string | null) => (iso ? fmt(iso, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "–");
@@ -51,8 +52,29 @@ export function MailboxHistory({ days, emails }: { days: HistoryDay[]; emails: R
           <header className="hist-day-head">
             <b>{dayLabel(d.day)}</b>
             <span className="muted small">
-              {d.sent} sent{d.failed ? ` · ${d.failed} failed` : ""}
-              {d.replies ? ` · ${d.replies} repl${d.replies === 1 ? "y" : "ies"}` : ""}
+              {d.sent ? (
+                <Link href={sentLeadsHref("sent", d.day)} className="hist-link" title="Show these leads">
+                  {d.sent} sent
+                </Link>
+              ) : (
+                "0 sent"
+              )}
+              {d.failed ? (
+                <>
+                  {" · "}
+                  <Link href={sentLeadsHref("failed", d.day)} className="hist-link bad" title="Show these leads">
+                    {d.failed} failed
+                  </Link>
+                </>
+              ) : null}
+              {d.replies ? (
+                <>
+                  {" · "}
+                  <Link href={sentLeadsHref("replied", d.day)} className="hist-link" title="Show these leads">
+                    {d.replies} repl{d.replies === 1 ? "y" : "ies"}
+                  </Link>
+                </>
+              ) : null}
               {d.sent ? ` · ${range(d.first, d.last)}` : ""}
             </span>
           </header>
@@ -71,10 +93,32 @@ export function MailboxHistory({ days, emails }: { days: HistoryDay[]; emails: R
                 <tr key={m.mailboxId}>
                   <td>{emails[m.mailboxId] ?? "Removed mailbox"}</td>
                   <td className="num">
-                    <b>{m.sent}</b>
+                    {m.sent ? (
+                      <Link href={sentLeadsHref("sent", d.day, m.mailboxId)} className="hist-num" title="Show the leads sent to">
+                        {m.sent}
+                      </Link>
+                    ) : (
+                      <span className="muted">0</span>
+                    )}
                   </td>
-                  <td className={`num${m.failed ? " bad" : " muted"}`}>{m.failed}</td>
-                  <td className="num">{m.replies}</td>
+                  <td className="num">
+                    {m.failed ? (
+                      <Link href={sentLeadsHref("failed", d.day, m.mailboxId)} className="hist-num bad" title="Show the leads that failed">
+                        {m.failed}
+                      </Link>
+                    ) : (
+                      <span className="muted">0</span>
+                    )}
+                  </td>
+                  <td className="num">
+                    {m.replies ? (
+                      <Link href={sentLeadsHref("replied", d.day, m.mailboxId)} className="hist-num" title="Show the leads that replied">
+                        {m.replies}
+                      </Link>
+                    ) : (
+                      <span className="muted">0</span>
+                    )}
+                  </td>
                   <td className="muted">{range(m.first, m.last)}</td>
                 </tr>
               ))}

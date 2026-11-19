@@ -12,7 +12,7 @@ import { cityFrom, postcodeFrom, searchPlaces } from "./leads/places";
 import { fetchNewMail, stripQuoted } from "./mail/inbox";
 import { sendMail } from "./mail/send";
 import { jitterFor, planSequence } from "./sequence/schedule";
-import { renderEmail, threadSubject } from "./sequence/render";
+import { auditSubject, renderEmail, threadSubject } from "./sequence/render";
 import { pixelUrl, textToHtml, trackedUrl } from "./tracking";
 import { writeTemplateSequence } from "./sequence/template";
 import type { Campaign, Lead, Mailbox, Message } from "./types";
@@ -243,6 +243,16 @@ export async function enrichLeads(limit = 10) {
         });
         continue;
       }
+      // One address per campaign (unique index leads_campaign_email_uniq): if another lead already has it, this one is a duplicate.
+      if (lead.campaign_id) {
+        const twin = must(
+          await db().from("leads").select("id,company").eq("campaign_id", lead.campaign_id).ilike("email", likeExact(r.email)).neq("id", lead.id).limit(1),
+        ) as { id: string; company: string }[];
+        if (twin.length) {
+          await setLead(lead.id, { ...patch, status: "error", last_error: `Duplicate: ${r.email} already belongs to another lead (${twin[0].company}).` });
+          continue;
+        }
+      }
       await setLead(lead.id, {
         ...patch,
         email: r.email,
@@ -356,7 +366,7 @@ export async function writeEmails(limit = 5) {
         campaign_id: campaign.id,
         direction: "out",
         step: i,
-        subject: threadSubject(emails[0].subject, i),
+        subject: threadSubject(auditSubject(lead), i),
         body_text: e.body,
         status: "draft",
       }));
@@ -435,6 +445,28 @@ export async function approveLeads(leadIds: string[]): Promise<{ scheduled: numb
     scheduled++;
   }
   return { scheduled, blocked };
+}
+
+/**
+ * After a lead's email address is corrected: emails that failed to the old address (with none sent)
+ * go back to draft and are scheduled again from now. Leads with emails already sent are left alone;
+ * their remaining scheduled emails simply go to the new address.
+ */
+export async function requeueFailed(leadId: string): Promise<{ requeued: boolean; note: string }> {
+  const lead = must(await db().from("leads").select("*").eq("id", leadId).single()) as Lead;
+  const out = must(
+    await db().from("messages").select("id,status").eq("lead_id", leadId).eq("direction", "out"),
+  ) as Pick<Message, "id" | "status">[];
+  const failed = out.filter((m) => m.status === "failed");
+  if (!failed.length) return { requeued: false, note: "" };
+  if (out.some((m) => m.status === "sent")) return { requeued: false, note: "Earlier emails were already sent, so the failed one was not re-sent." };
+  if (!["sequencing", "error", "bounced"].includes(lead.status)) return { requeued: false, note: `Lead is "${lead.status}", so nothing was re-sent.` };
+  const reset = out.filter((m) => ["failed", "scheduled"].includes(m.status)).map((m) => m.id);
+  must(await db().from("messages").update({ status: "draft", error: null, scheduled_for: null }).in("id", reset));
+  await setLead(leadId, { status: "ready", last_error: null });
+  const r = await approveLeads([leadId]);
+  if (r.scheduled) return { requeued: true, note: "Emails re-scheduled to the new address." };
+  return { requeued: false, note: `Emails are back to draft but not scheduled: ${r.blocked.join("; ") || "approve them from this page"}.` };
 }
 
 // ---------- 6. send ----------

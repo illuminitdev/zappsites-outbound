@@ -15,12 +15,15 @@ import { parseLeadsCsv } from "@/lib/leads/csv";
 import Papa from "papaparse";
 import { readSheet } from "read-excel-file/node";
 import { verifySmtp } from "@/lib/mail/send";
+import { cleanEmail, hasMx, isValidSyntax } from "@/lib/leads/email";
 import {
   approveLeads,
   importFromCompaniesHouse,
   importFromPlaces,
   importLeads,
+  isSuppressed,
   markMeeting,
+  requeueFailed,
   sendReply,
   tick,
   unsubscribeBySlug,
@@ -209,6 +212,21 @@ export async function resetLead(f: FormData) {
   back(`/leads/${id}`, "Lead reset; it will be re-processed on the next run");
 }
 
+/**
+ * Manual retry for leads whose emails couldn't be written (e.g. out of API credit): puts them back to
+ * "audited" so the next run writes them again. One lead (id) or every such lead (id = "all").
+ */
+export async function retryWriting(f: FormData) {
+  const id = str(f, "id");
+  let q = db().from("leads").update({ status: "audited", last_error: null }).eq("status", "error").like("last_error", "Write:%");
+  if (id !== "all") q = q.eq("id", id);
+  const rows = must(await q.select("id")) as { id: string }[];
+  const msg = rows.length
+    ? `${rows.length} lead${rows.length === 1 ? "" : "s"} queued: emails will be written on the next run (within a few minutes)`
+    : "Nothing to retry";
+  back(id === "all" ? "/leads" : `/leads/${id}`, msg);
+}
+
 export async function saveDraft(f: FormData) {
   const id = str(f, "id");
   must(await db().from("messages").update({ subject: str(f, "subject"), body_text: str(f, "body") }).eq("id", id).in("status", ["draft", "scheduled"]));
@@ -219,6 +237,29 @@ export async function approveOne(f: FormData) {
   const id = str(f, "id");
   const r = await approveLeads([id]);
   back(`/leads/${id}`, r.scheduled ? "Scheduled" : `Not scheduled: ${r.blocked.join("; ") || "lead is not in 'ready' state"}`);
+}
+
+export type EmailEditState = { ok: false; error: string } | null;
+
+/** Lead page: correct a lead's email. Emails that failed to the old address are re-scheduled to the new one. */
+export async function updateLeadEmail(_prev: EmailEditState, f: FormData): Promise<EmailEditState> {
+  const id = str(f, "id");
+  const email = cleanEmail(str(f, "email"));
+  if (!isValidSyntax(email)) return { ok: false, error: "That doesn't look like an email address (e.g. info@company.co.uk)." };
+  const lead = must(await db().from("leads").select("id,email").eq("id", id).maybeSingle()) as Pick<Lead, "id" | "email"> | null;
+  if (!lead) return { ok: false, error: "Lead not found." };
+  if (lead.email === email) return { ok: false, error: "That's already the email on this lead." };
+  if (!(await hasMx(email.split("@")[1]))) return { ok: false, error: `${email.split("@")[1]} can't receive email (no mail server found). Check the spelling.` };
+  if (await isSuppressed(email)) return { ok: false, error: "That address (or its domain) is on the do-not-contact list." };
+  const twin = must(
+    await db().from("leads").select("company").eq("email", email).neq("id", id).not("status", "in", "(new,enriched,audited,ready,error)").limit(1),
+  ) as { company: string }[];
+  if (twin.length) return { ok: false, error: `That address is already being contacted as another lead (${twin[0].company}).` };
+
+  must(await db().from("leads").update({ email, email_status: "valid", email_source: "manual" }).eq("id", id));
+  const r = await requeueFailed(id);
+  back(`/leads/${id}`, `Email changed to ${email}.${r.note ? ` ${r.note}` : ""}`);
+  return null;
 }
 
 export async function meetingBooked(f: FormData) {

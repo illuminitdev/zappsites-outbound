@@ -11,6 +11,10 @@ const STAGE: Record<string, string> = {
  */
 export function friendlyError(raw: string | null | undefined): string | null {
   if (!raw) return null;
+  // Already written for people (see enrich): show as is.
+  if (raw.startsWith("Duplicate:")) return raw;
+  // Older leads saved the raw database error for the one-email-per-campaign rule.
+  if (/leads_campaign_email_uniq/.test(raw)) return "Duplicate: this email already belongs to another lead in this campaign.";
   const m = raw.match(/^(Enrich|Audit|Inbound audit|Write):\s*([\s\S]*)$/);
   const stage = m ? STAGE[m[1]] : null;
   const rest = (m ? m[2] : raw).trim();
